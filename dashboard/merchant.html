@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Merchant Dashboard — Pine Labs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: rgba(255,255,255,0.07);
+    --accent: #6366f1;
+    --accent2: #22d3ee;
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --text: #f1f5f9;
+    --muted: #64748b;
+    --card-glow: 0 0 0 1px rgba(99,102,241,0.1), 0 4px 24px rgba(0,0,0,0.4);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; }
+
+  /* Top bar */
+  .topbar {
+    background: linear-gradient(135deg, #1e1b4b 0%, #0a0d14 60%);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    height: 64px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-icon { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .logo-text { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+  .logo-sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .merchant-selector { display: flex; align-items: center; gap: 10px; }
+  select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; outline: none; }
+  .refresh-btn { background: var(--accent); border: none; color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif; }
+  .refresh-btn:hover { background: #4f46e5; transform: translateY(-1px); }
+
+  /* Layout */
+  .main { max-width: 1400px; margin: 0 auto; padding: 28px 32px; }
+  
+  .merchant-header {
+    background: linear-gradient(135deg, #1e1b4b 0%, #0c1322 100%);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: 16px; padding: 24px 28px; margin-bottom: 28px;
+    display: flex; justify-content: space-between; align-items: center;
+    position: relative; overflow: hidden;
+  }
+  .merchant-header::before {
+    content: ''; position: absolute; top: -60px; right: -60px;
+    width: 200px; height: 200px; background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
+    border-radius: 50%; pointer-events: none;
+  }
+  .merchant-name { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .merchant-meta { display: flex; gap: 16px; margin-top: 8px; }
+  .meta-chip { font-size: 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 4px 12px; border-radius: 20px; color: var(--muted); }
+  .risk-badge { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+  .risk-LOW { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+  .risk-MEDIUM { background: rgba(245,158,11,0.15); color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+  .risk-HIGH { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+  .risk-CRITICAL { background: rgba(239,68,68,0.25); color: #ff6b6b; border: 1px solid rgba(239,68,68,0.5); animation: pulse-border 2s infinite; }
+  .risk-UNKNOWN { background: rgba(100,116,139,0.15); color: var(--muted); border: 1px solid var(--border); }
+  @keyframes pulse-border { 0%,100% { border-color: rgba(239,68,68,0.5); } 50% { border-color: rgba(239,68,68,0.9); } }
+
+  /* Stats row */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px 22px; transition: transform 0.2s, border-color 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .stat-card:hover { transform: translateY(-2px); border-color: rgba(99,102,241,0.3); }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 14px 14px 0 0; opacity: 0; transition: opacity 0.2s; }
+  .stat-card:hover::before { opacity: 1; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
+  .stat-value { font-size: 26px; font-weight: 800; margin: 8px 0 4px; letter-spacing: -1px; }
+  .stat-delta { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+  .delta-up { color: var(--green); }
+  .delta-down { color: var(--red); }
+  .stat-icon { position: absolute; top: 18px; right: 18px; font-size: 22px; opacity: 0.3; }
+
+  /* Charts grid */
+  .charts-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px; box-shadow: var(--card-glow);
+  }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+  .card-subtitle { font-size: 11px; color: var(--muted); }
+
+  /* Bottom row */
+  .bottom-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+
+  /* Credit gauge */
+  .credit-section { text-align: center; }
+  .gauge-wrap { position: relative; width: 160px; height: 90px; margin: 0 auto 12px; }
+  .score-label { font-size: 28px; font-weight: 800; letter-spacing: -1px; }
+  .score-tier { font-size: 12px; font-weight: 600; margin-top: 4px; padding: 3px 12px; border-radius: 20px; display: inline-block; }
+  .tier-PREMIUM { background: rgba(16,185,129,0.15); color: var(--green); }
+  .tier-STANDARD { background: rgba(99,102,241,0.15); color: #818cf8; }
+  .tier-BASIC { background: rgba(245,158,11,0.15); color: var(--yellow); }
+  .tier-INELIGIBLE { background: rgba(239,68,68,0.15); color: var(--red); }
+  .credit-limit { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .credit-limit span { color: var(--text); font-weight: 600; }
+
+  /* AML panel */
+  .aml-score-ring { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 16px; }
+  .ring-wrap { position: relative; width: 80px; height: 80px; }
+  .ring-score { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;justify-content: center; }
+  .ring-num { font-size: 20px; font-weight: 800; line-height: 1; }
+  .ring-max { font-size: 9px; color: var(--muted); }
+  .aml-info { flex: 1; }
+  .aml-level { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .aml-rec { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .alert-list { display: flex; flex-direction: column; gap: 8px; }
+  .alert-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border-left: 3px solid; }
+  .alert-CRITICAL { border-color: var(--red); }
+  .alert-HIGH { border-color: var(--yellow); }
+  .alert-MEDIUM { border-color: #818cf8; }
+  .alert-LOW { border-color: var(--muted); }
+  .alert-title { font-size: 12px; font-weight: 600; }
+  .alert-desc { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .sev-badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+  .sev-CRITICAL { background: rgba(239,68,68,0.2); color: var(--red); }
+  .sev-HIGH { background: rgba(245,158,11,0.2); color: var(--yellow); }
+  .sev-MEDIUM { background: rgba(129,140,248,0.2); color: #818cf8; }
+  .sev-LOW { background: rgba(100,116,139,0.2); color: var(--muted); }
+
+  /* Forecast */
+  .forecast-row { display: flex; justify-content: space-between; margin-bottom: 14px; }
+  .forecast-item { text-align: center; }
+  .forecast-val { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+  .forecast-lbl { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .vol-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .vol-LOW { background: rgba(16,185,129,0.15); color: var(--green); }
+  .vol-MEDIUM { background: rgba(245,158,11,0.15); color: var(--yellow); }
+  .vol-HIGH { background: rgba(239,68,68,0.15); color: var(--red); }
+
+  .loading { text-align: center; padding: 60px; color: var(--muted); font-size: 14px; }
+  .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .scan-btn { background: transparent; border: 1px solid rgba(239,68,68,0.4); color: #ff6b6b; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: 'Inter',sans-serif; transition: all 0.2s; }
+  .scan-btn:hover { background: rgba(239,68,68,0.1); }
+  .no-alerts { text-align: center; padding: 24px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon">💳</div>
+    <div>
+      <div class="logo-text">Pine Labs</div>
+      <div class="logo-sub">Merchant Dashboard</div>
+    </div>
+  </div>
+  <div class="merchant-selector">
+    <select id="merchantSelect" onchange="loadMerchant(this.value)">
+      <option value="">Loading merchants...</option>
+    </select>
+    <button class="refresh-btn" onclick="reload()">↻ Refresh</button>
+  </div>
+</div>
+
+<div class="main">
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    Loading merchant data...
+  </div>
+  <div id="content" style="display:none">
+    <!-- Merchant Header -->
+    <div class="merchant-header">
+      <div>
+        <div class="merchant-name" id="bizName">—</div>
+        <div class="merchant-meta">
+          <span class="meta-chip" id="bizType">—</span>
+          <span class="meta-chip" id="bizCity">—</span>
+          <span class="meta-chip" id="merchantId">—</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-align:right;margin-bottom:4px">AML RISK LEVEL</div>
+          <div class="risk-badge risk-UNKNOWN" id="riskBadge">UNKNOWN</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-icon">💰</span>
+        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-value" id="todayRev">—</div>
+        <div class="stat-delta" id="revDelta">—</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">📅</span>
+        <div class="stat-label">30-Day Revenue</div>
+        <div class="stat-value" id="rev30">—</div>
+        <div class="stat-delta" id="avgTxn">—</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">✅</span>
+        <div class="stat-label">Success Rate</div>
+        <div class="stat-value" id="successRate">—</div>
+        <div class="stat-delta" id="txnCount">—</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">📊</span>
+        <div class="stat-label">Avg Transaction</div>
+        <div class="stat-value" id="avgTxnVal">—</div>
+        <div class="stat-delta" id="txnWindow">—</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="card-title">
+          <span>Revenue Trend — Last 7 Days</span>
+          <span class="card-subtitle" id="weekGrowth">—</span>
+        </div>
+        <canvas id="revenueChart" height="130"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">
+          <span>Payment Methods</span>
+          <span class="card-subtitle">Last 30 days</span>
+        </div>
+        <canvas id="paymentChart" height="140"></canvas>
+        <div id="paymentLegend" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <!-- Bottom -->
+    <div class="bottom-grid">
+      <!-- Cashflow -->
+      <div class="chart-card">
+        <div class="card-title">🔮 Cashflow Forecast</div>
+        <div class="forecast-row" id="forecastRow">
+          <div class="forecast-item"><div class="forecast-val" id="fcActual">—</div><div class="forecast-lbl">Last 7 Days</div></div>
+          <div class="forecast-item"><div class="forecast-val" style="color:var(--accent2)" id="fcPredicted">—</div><div class="forecast-lbl">Next 7 Days</div></div>
+          <div class="forecast-item"><div class="forecast-val" id="fcGrowth">—</div><div class="forecast-lbl">WoW Growth</div></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:12px 0">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px;color:var(--muted)">Revenue Volatility</span>
+          <span class="vol-badge vol-LOW" id="volatility">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+          <span style="font-size:12px;color:var(--muted)">Confidence</span>
+          <span style="font-size:12px;font-weight:600" id="fcConfidence">—</span>
+        </div>
+      </div>
+
+      <!-- Credit -->
+      <div class="chart-card">
+        <div class="card-title">🏦 Credit Eligibility</div>
+        <div class="credit-section">
+          <canvas id="creditGauge" width="160" height="90"></canvas>
+          <div class="score-label" id="creditScore">—</div>
+          <div><span class="score-tier tier-BASIC" id="creditTier">—</span></div>
+          <div class="credit-limit" id="creditLimit">—</div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+        <div style="font-size:12px;color:var(--muted);line-height:1.5" id="creditReason">—</div>
+      </div>
+
+      <!-- AML -->
+      <div class="chart-card">
+        <div class="card-title">
+          🚨 AML Risk Status
+          <button class="scan-btn" onclick="runScan()">Run Scan</button>
+        </div>
+        <div class="aml-score-ring">
+          <div class="ring-wrap">
+            <canvas id="amlRing" width="80" height="80"></canvas>
+            <div class="ring-score">
+              <div class="ring-num" id="amlScore">—</div>
+              <div class="ring-max">/100</div>
+            </div>
+          </div>
+          <div class="aml-info">
+            <div class="aml-level risk-badge risk-UNKNOWN" id="amlLevel">UNKNOWN</div>
+            <div class="aml-rec" id="amlRec" style="margin-top:8px">Run a scan to check this merchant's fraud risk.</div>
+          </div>
+        </div>
+        <div class="alert-list" id="alertList">
+          <div class="no-alerts">No active alerts</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8001';
+let currentMerchant = null;
+let revenueChart = null, paymentChart = null, amlRingChart = null, creditGaugeChart = null;
+
+const COLORS_PAYMENT = ['#6366f1','#22d3ee','#10b981','#f59e0b','#ec4899'];
+
+async function fetchMerchants() {
+  const r = await fetch(`${API}/api/merchants`);
+  const data = await r.json();
+  const sel = document.getElementById('merchantSelect');
+  sel.innerHTML = '';
+  data.merchants.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.merchant_id;
+    opt.textContent = `${m.business_name} (${m.merchant_id})`;
+    sel.appendChild(opt);
+  });
+  if (data.merchants.length > 0) loadMerchant(data.merchants[0].merchant_id);
+  else { document.getElementById('loading').innerHTML = '<div style="color:var(--muted);padding:60px;text-align:center">No merchants found. Please onboard a merchant via the API.</div>'; }
+}
+
+async function loadMerchant(mid) {
+  if (!mid) return;
+  currentMerchant = mid;
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('content').style.display = 'none';
+
+  const [summary, breakdown, cashflow, credit, aml, txns] = await Promise.all([
+    fetch(`${API}/api/merchants/${mid}/summary`).then(r=>r.json()),
+    fetch(`${API}/api/merchants/${mid}/payment_breakdown`).then(r=>r.json()),
+    fetch(`${API}/api/merchants/${mid}/cashflow`).then(r=>r.json()),
+    fetch(`${API}/api/merchants/${mid}/credit`).then(r=>r.json()),
+    fetch(`${API}/api/merchants/${mid}/aml`).then(r=>r.json()),
+    fetch(`${API}/api/merchants/${mid}/transactions?days=7`).then(r=>r.json()),
+  ]);
+
+  // Header
+  const merchants = (await fetch(`${API}/api/merchants`).then(r=>r.json())).merchants;
+  const merchant = merchants.find(m=>m.merchant_id===mid) || {};
+  document.getElementById('bizName').textContent = merchant.business_name || mid;
+  document.getElementById('bizType').textContent = merchant.business_type || '—';
+  document.getElementById('bizCity').textContent = `${merchant.city||''}, ${merchant.state||''}`;
+  document.getElementById('merchantId').textContent = mid;
+
+  setRiskBadge('riskBadge', aml.risk_level || 'UNKNOWN');
+
+  // Stats
+  document.getElementById('todayRev').textContent = fmt(summary.today_revenue);
+  const delta = summary.wow_growth_pct;
+  document.getElementById('revDelta').innerHTML = `<span class="${delta>=0?'delta-up':'delta-down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}% vs yesterday</span>`;
+  document.getElementById('rev30').textContent = fmt(summary.last_30_days_revenue);
+  document.getElementById('avgTxn').innerHTML = `<span style="color:var(--muted)">Daily avg ₹${Math.round(summary.avg_daily_revenue_30d).toLocaleString()}</span>`;
+  document.getElementById('successRate').textContent = summary.success_rate_pct + '%';
+  document.getElementById('txnCount').innerHTML = `<span style="color:var(--muted)">${summary.total_transactions_30d} txns last 30d</span>`;
+  document.getElementById('avgTxnVal').textContent = fmt(summary.avg_transaction_value);
+  document.getElementById('txnWindow').innerHTML = `<span style="color:var(--muted)">7-day revenue ₹${Math.round(summary.last_7_days_revenue).toLocaleString()}</span>`;
+
+  // Revenue Chart
+  const labels = (txns.daily_series || []).map(d => {
+    const dt = new Date(d.date); return dt.toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+  });
+  const vals = (txns.daily_series || []).map(d => d.revenue);
+  if (revenueChart) revenueChart.destroy();
+  revenueChart = new Chart(document.getElementById('revenueChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Revenue (₹)', data: vals,
+        backgroundColor: vals.map((v,i)=>i===vals.length-1?'rgba(34,211,238,0.8)':'rgba(99,102,241,0.6)'),
+        borderRadius: 6, borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 }, callback: v => '₹'+v.toLocaleString() } }
+      }
+    }
+  });
+  document.getElementById('weekGrowth').textContent = `WoW ${summary.wow_growth_pct >= 0 ? '+' : ''}${summary.wow_growth_pct}%`;
+
+  // Payment chart
+  const bdKeys = Object.keys(breakdown.breakdown || {});
+  const bdVals = bdKeys.map(k => breakdown.breakdown[k].volume);
+  if (paymentChart) paymentChart.destroy();
+  paymentChart = new Chart(document.getElementById('paymentChart'), {
+    type: 'doughnut',
+    data: {
+      labels: bdKeys,
+      datasets: [{ data: bdVals, backgroundColor: COLORS_PAYMENT.slice(0, bdKeys.length), borderWidth: 0, hoverOffset: 6 }]
+    },
+    options: {
+      responsive: true, cutout: '70%',
+      plugins: { legend: { display: false } }
+    }
+  });
+  const legend = document.getElementById('paymentLegend');
+  legend.innerHTML = bdKeys.map((k, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px"><span style="width:10px;height:10px;border-radius:2px;background:${COLORS_PAYMENT[i]};display:inline-block"></span>${k}</span>
+      <span style="font-size:12px;font-weight:600">₹${Math.round(breakdown.breakdown[k].volume).toLocaleString()}</span>
+    </div>`).join('');
+
+  // Cashflow
+  document.getElementById('fcActual').textContent = fmt(cashflow.last_7_days_actual);
+  document.getElementById('fcPredicted').textContent = fmt(cashflow.predicted_next_7_days);
+  const g = cashflow.week_on_week_growth_pct;
+  document.getElementById('fcGrowth').innerHTML = `<span style="color:${g>=0?'var(--green)':'var(--red)'}">${g>=0?'+':''}${g}%</span>`;
+  const volEl = document.getElementById('volatility');
+  volEl.textContent = cashflow.revenue_volatility;
+  volEl.className = `vol-badge vol-${cashflow.revenue_volatility}`;
+  document.getElementById('fcConfidence').textContent = cashflow.confidence;
+
+  // Credit gauge
+  const cscore = credit.health_score || 0;
+  if (creditGaugeChart) creditGaugeChart.destroy();
+  creditGaugeChart = new Chart(document.getElementById('creditGauge'), {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [cscore, 100 - cscore],
+        backgroundColor: [scoreColor(credit.tier), 'rgba(255,255,255,0.05)'],
+        borderWidth: 0, circumference: 180, rotation: 270,
+      }]
+    },
+    options: { responsive: false, cutout: '75%', plugins: { legend: { display: false } } }
+  });
+  document.getElementById('creditScore').textContent = cscore + '/100';
+  const tierEl = document.getElementById('creditTier');
+  tierEl.textContent = credit.tier;
+  tierEl.className = `score-tier tier-${credit.tier}`;
+  document.getElementById('creditLimit').innerHTML = credit.eligible
+    ? `Credit Limit: <span>₹${Math.round(credit.recommended_credit_limit).toLocaleString()}</span> · ${credit.repayment_term_days}d repay`
+    : `<span style="color:var(--red)">Not Eligible</span>`;
+  document.getElementById('creditReason').textContent = credit.reason;
+
+  // AML
+  renderAML(aml);
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+
+function renderAML(aml) {
+  document.getElementById('amlScore').textContent = aml.risk_score ?? '—';
+  setRiskBadge('amlLevel', aml.risk_level || 'UNKNOWN');
+  document.getElementById('amlRec').textContent = aml.risk_level
+    ? ({LOW:'No immediate action required.',MEDIUM:'Elevated risk — review flagged transactions.',HIGH:'High risk — consider transaction limits.',CRITICAL:'⚠ IMMEDIATE ACTION: freeze and escalate.'}[aml.risk_level] || '')
+    : 'Run a scan to check this merchant\'s fraud risk.';
+
+  const score = aml.risk_score ?? 0;
+  if (amlRingChart) amlRingChart.destroy();
+  const ringColor = score >= 80 ? '#ef4444' : score >= 50 ? '#f59e0b' : score >= 25 ? '#818cf8' : '#10b981';
+  amlRingChart = new Chart(document.getElementById('amlRing'), {
+    type: 'doughnut',
+    data: { datasets: [{ data: [score, 100-score], backgroundColor: [ringColor,'rgba(255,255,255,0.05)'], borderWidth: 0 }] },
+    options: { responsive: false, cutout: '72%', plugins: { legend: { display: false } } }
+  });
+
+  const alerts = aml.active_alerts || [];
+  const list = document.getElementById('alertList');
+  if (!alerts.length) { list.innerHTML = '<div class="no-alerts">✅ No active fraud alerts</div>'; return; }
+  list.innerHTML = alerts.slice(0,4).map(a => `
+    <div class="alert-item alert-${a.severity}">
+      <span class="sev-badge sev-${a.severity}">${a.severity}</span>
+      <div><div class="alert-title">${a.rule_name}</div></div>
+    </div>`).join('');
+}
+
+async function runScan() {
+  if (!currentMerchant) return;
+  const btn = document.querySelector('.scan-btn');
+  btn.textContent = 'Scanning...'; btn.disabled = true;
+  const r = await fetch(`${API}/api/merchants/${currentMerchant}/scan`, { method: 'POST' });
+  const data = await r.json();
+  renderAML(data);
+  setRiskBadge('riskBadge', data.risk_level || 'UNKNOWN');
+  btn.textContent = 'Run Scan'; btn.disabled = false;
+}
+
+function setRiskBadge(id, level) {
+  const el = document.getElementById(id);
+  el.className = `risk-badge risk-${level}`;
+  el.textContent = level;
+}
+
+function fmt(v) { return v != null ? '₹' + Number(v).toLocaleString('en-IN', {maximumFractionDigits:0}) : '—'; }
+function scoreColor(tier) { return {PREMIUM:'#10b981',STANDARD:'#6366f1',BASIC:'#f59e0b',INELIGIBLE:'#ef4444'}[tier] || '#64748b'; }
+function reload() { if (currentMerchant) loadMerchant(currentMerchant); }
+
+fetchMerchants();
+</script>
+</body>
+</html>

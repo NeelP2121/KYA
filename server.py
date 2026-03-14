@@ -17,17 +17,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp.server.fastmcp import FastMCP
-from db.database import DB_PATH, init_db
+from db.database import init_db
+from mfos.mfos_db import init_mfos_db
+from mfos.aml_db import init_aml_db
 import kyc_service as svc
+import mfos.mfos_service as mfos_svc
 
 # ─────────────────────────────────────────────────────────
 # Initialise
 # ─────────────────────────────────────────────────────────
 
 init_db()
-
-MCP_HOST = os.environ.get("KYC_MCP_HOST", "0.0.0.0")
-MCP_PORT = int(os.environ.get("KYC_MCP_PORT", 8000))
+init_mfos_db()
+init_aml_db()
 
 mcp = FastMCP(
     name="kyc-mcp-server",
@@ -287,118 +289,114 @@ def list_supported_document_types() -> str:
 
 
 # ─────────────────────────────────────────────────────────
-# Tool 9 — register_agent
+# Finance Tools: MFOS Integration
 # ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def register_agent(
-    user_id: str,
-    agent_name: str,
-    description: str = "",
-    capabilities_json: str = "",
-) -> str:
+def onboard_merchant(kyc_user_id: str, agent_id: str, business_name: str,
+                     business_type: str = "Retail", city: str = "", state: str = "") -> str:
     """
-    Register a customer-controlled agent with AR.
-
+    Onboard a KYC-verified user as a merchant to unlock Finance tools.
+    Requires a valid agent_id (issued post-verification).
+    
     Args:
-        user_id:           The AR user who owns this agent.
-        agent_name:        Display name for the agent.
-        description:       Optional plain-language description.
-        capabilities_json: Optional JSON array of allowed capabilities, for example:
-                           ["ECOMMERCE_ACCESS", "CHECKOUT"]
-                           Defaults to ["ECOMMERCE_ACCESS"] when omitted.
-
-    Returns:
-        JSON with the AR-managed agent_id and granted capabilities.
+        kyc_user_id:   The user's UUID.
+        agent_id:      The unique agent_id from the registry.
+        business_name: Name of the business.
+        business_type: (Optional) e.g., Retail, Service.
+        city:          (Optional) City.
+        state:         (Optional) State.
     """
-    capabilities = None
-    if capabilities_json.strip():
-        try:
-            capabilities = json.loads(capabilities_json)
-        except json.JSONDecodeError as e:
-            return json.dumps({"success": False, "error": f"Invalid capabilities_json: {e}"})
+    result = mfos_svc.onboard_merchant(kyc_user_id, agent_id, business_name, business_type, city, state)
+    return json.dumps(result, indent=2)
 
-        if not isinstance(capabilities, list):
-            return json.dumps(
-                {"success": False, "error": "capabilities_json must decode to a JSON array."}
-            )
+@mcp.tool()
+def get_revenue_summary(merchant_id: str) -> str:
+    """
+    Get the financial revenue summary: today, yesterday, 7-day, 30-day, WoW growth.
+    
+    Args:
+        merchant_id: The merchant's unique ID from onboard_merchant.
+    """
+    result = mfos_svc.get_revenue_summary(merchant_id)
+    return json.dumps(result, indent=2)
 
-    result = svc.register_agent(
-        user_id=user_id,
-        agent_name=agent_name,
-        description=description,
-        capabilities=capabilities,
-    )
+@mcp.tool()
+def get_payment_breakdown(merchant_id: str, days_back: int = 30) -> str:
+    """
+    Get payment method breakdown by volume and transaction count (e.g., UPI, Card, NetBanking).
+    
+    Args:
+        merchant_id: The merchant's unique ID.
+        days_back:   Lookback period in days (default 30).
+    """
+    result = mfos_svc.get_payment_breakdown(merchant_id, days_back)
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+def predict_cashflow(merchant_id: str) -> str:
+    """
+    Predict next 7 days revenue based on current rolling trends.
+    
+    Args:
+        merchant_id: The merchant's unique ID.
+    """
+    result = mfos_svc.predict_cashflow(merchant_id)
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+def check_credit_eligibility(merchant_id: str) -> str:
+    """
+    Check Working Capital eligibility, business health score, and projected credit limit.
+    
+    Args:
+        merchant_id: The merchant's unique ID.
+    """
+    result = mfos_svc.check_credit_eligibility(merchant_id)
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+def list_merchants() -> str:
+    """
+    Admin tool: List all onboarded merchants in the financial system.
+    """
+    result = mfos_svc.list_merchants()
     return json.dumps(result, indent=2)
 
 
 # ─────────────────────────────────────────────────────────
-# Tool 10 — verify_agent_capability
+# AML & Fraud Detection Tools
 # ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def verify_agent_capability(agent_id: str, capability: str = "ECOMMERCE_ACCESS") -> str:
+def scan_merchant_for_fraud(merchant_id: str) -> str:
     """
-    Verify that an agent is registered with AR and has the capability needed
-    before traffic is forwarded to an ecommerce MCP.
+    Run a full AML (Anti-Money Laundering) and fraud detection scan on a merchant.
+    Evaluates 7 rule-based signals:
+      R1 Structuring, R2 Round Amount Surge, R3 Velocity Spike,
+      R4 Revenue Anomaly, R5 Refund Abuse, R6 Card Testing (CRITICAL), R7 Dormant Surge.
+
+    Returns a composite risk score (0–100), risk level (LOW/MEDIUM/HIGH/CRITICAL),
+    and detailed flags with supporting evidence for each triggered rule.
 
     Args:
-        agent_id:    The AR-managed agent_id returned by register_agent.
-        capability:  Capability required for the next routed action.
-
-    Returns:
-        JSON with allow/block decision and next steps for the MCP client.
+        merchant_id: The merchant's unique ID from onboard_merchant.
     """
-    result = svc.verify_agent_capability(agent_id=agent_id, capability=capability)
-    return json.dumps(result, indent=2)
-
-
-# ─────────────────────────────────────────────────────────
-# Tool 11 — register_service
-# ─────────────────────────────────────────────────────────
-
-@mcp.tool()
-def register_service(
-    service_name: str,
-    service_url: str,
-    description: str = "",
-    capabilities_json: str = "",
-) -> str:
-    """
-    Register an ecommerce or other service with AR for traffic verification.
-
-    Args:
-        service_name:      Unique name (e.g. "solespace", "payment-gateway").
-        service_url:       Base URL of the service (e.g. "http://localhost:8001").
-        description:       What this service does.
-        capabilities_json: JSON array of capabilities offered, e.g. '["ECOMMERCE"]'
-
-    Returns:
-        JSON with service registration details.
-    """
-    capabilities = None
-    if capabilities_json.strip():
-        try:
-            capabilities = json.loads(capabilities_json)
-        except json.JSONDecodeError as e:
-            return json.dumps({"success": False, "error": f"Invalid capabilities_json: {e}"})
-    result = svc.register_service(service_name, service_url, description, capabilities)
+    result = mfos_svc.scan_merchant_for_fraud(merchant_id)
     return json.dumps(result, indent=2)
 
 @mcp.tool()
-def verify_traffic(agent_id: str, service_name: str) -> str:
+def get_aml_risk_score(merchant_id: str) -> str:
     """
-    Verify that an agent's traffic is legitimate before allowing access to a service.
-    Called by ecommerce or other services to gate incoming requests.
+    Retrieve the most recent AML risk score and active fraud alerts for a merchant.
+    Run scan_merchant_for_fraud first to populate the score.
+
+    Returns: risk_score (0–100), risk_level, last_scanned_at, and active_alerts list.
 
     Args:
-        agent_id:     The agent_id to verify.
-        service_name: The service the agent is trying to access (e.g. "solespace").
-
-    Returns:
-        JSON with allow/block decision.
+        merchant_id: The merchant's unique ID.
     """
-    result = svc.verify_traffic(agent_id, service_name)
+    result = mfos_svc.get_aml_risk_score(merchant_id)
     return json.dumps(result, indent=2)
 
 
@@ -408,17 +406,16 @@ def verify_traffic(agent_id: str, service_name: str) -> str:
 
 if __name__ == "__main__":
     from otp_service import OTP_VALIDITY_MINUTES
-    import sys as _sys
 
-    tool_count = len(getattr(mcp, "_tool_manager")._tools)
+    port = int(os.environ.get("KYC_MCP_PORT", 8000))
+    host = os.environ.get("KYC_MCP_HOST", "0.0.0.0")
 
-    if "--sse" in _sys.argv:
-        print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
-        print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
-        print(f"   Tools        : {tool_count} tools registered")
-        print(f"   Storage      : SQLite → {DB_PATH}")
-        print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
-        mcp.run(transport="sse")
-    else:
-        # Default: stdio transport (for Claude Desktop)
-        mcp.run(transport="stdio")
+    print(f"🚀 KYC MCP Server starting on http://{host}:{port}")
+    print(f"   SSE endpoint : http://{host}:{port}/sse")
+    print(f"   Tools        : 18 tools registered (10 KYC + 6 Finance + 2 AML)")
+    print(f"   Storage      : SQLite → kyc_store.db + mfos.db + aml_alerts.db")
+    print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
+
+    mcp.settings.host = host
+    mcp.settings.port = port
+    asyncio.run(mcp.run_sse_async())

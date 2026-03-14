@@ -10,6 +10,11 @@ from datetime import datetime, timedelta
 import secrets
 import hashlib
 import base64
+from mfos import mfos_service
+from mfos.mfos_db import init_mfos_db
+
+# Init db
+init_mfos_db()
 
 app = FastAPI(
     title="KYC Backend Service (Mock DigiLocker Trust Source)",
@@ -254,6 +259,13 @@ async def get_kyc_result(session_id: str):
         "verified_data": s.get("verified_data"),
         "message": f"KYC flow status: {status}"
     }
+
+@app.post("/webhook/pine-labs")
+async def pine_labs_webhook(event: dict = Body(...)):
+    """Webhook for Pine Labs to report payment successes, failures, etc."""
+    result = mfos_service.handle_pine_labs_event(event)
+    # The webhook endpoint usually just returns 200 OK + JSON
+    return result
 
 @app.post("/kyc/callback-simulate", response_model=KYCResult)
 async def simulate_callback(body: ConsentCallback模拟):
