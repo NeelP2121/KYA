@@ -37,7 +37,9 @@ mcp = FastMCP(
         "Use register_agent to issue an AR-managed agent_id for a customer-controlled agent. "
         "Use verify_agent_capability before routing any request to an ecommerce MCP. "
         "Use re_verify_kyc to update or replace documents for an existing user. "
-        "Use list_supported_document_types to see all verifiable document types."
+        "Use list_supported_document_types to see all verifiable document types. "
+        "Use register_service to register an ecommerce service with AR. "
+        "Use verify_traffic to verify agent traffic before allowing access to a service."
     ),
     host=MCP_HOST,
     port=MCP_PORT,
@@ -352,6 +354,55 @@ def verify_agent_capability(agent_id: str, capability: str = "ECOMMERCE_ACCESS")
 
 
 # ─────────────────────────────────────────────────────────
+# Tool 11 — register_service
+# ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+def register_service(
+    service_name: str,
+    service_url: str,
+    description: str = "",
+    capabilities_json: str = "",
+) -> str:
+    """
+    Register an ecommerce or other service with AR for traffic verification.
+
+    Args:
+        service_name:      Unique name (e.g. "solespace", "payment-gateway").
+        service_url:       Base URL of the service (e.g. "http://localhost:8001").
+        description:       What this service does.
+        capabilities_json: JSON array of capabilities offered, e.g. '["ECOMMERCE"]'
+
+    Returns:
+        JSON with service registration details.
+    """
+    capabilities = None
+    if capabilities_json.strip():
+        try:
+            capabilities = json.loads(capabilities_json)
+        except json.JSONDecodeError as e:
+            return json.dumps({"success": False, "error": f"Invalid capabilities_json: {e}"})
+    result = svc.register_service(service_name, service_url, description, capabilities)
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+def verify_traffic(agent_id: str, service_name: str) -> str:
+    """
+    Verify that an agent's traffic is legitimate before allowing access to a service.
+    Called by ecommerce or other services to gate incoming requests.
+
+    Args:
+        agent_id:     The agent_id to verify.
+        service_name: The service the agent is trying to access (e.g. "solespace").
+
+    Returns:
+        JSON with allow/block decision.
+    """
+    result = svc.verify_traffic(agent_id, service_name)
+    return json.dumps(result, indent=2)
+
+
+# ─────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────
 
@@ -360,7 +411,7 @@ if __name__ == "__main__":
 
     print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
     print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
-    print(f"   Tools        : 10 tools registered")
+    print(f"   Tools        : 12 tools registered")
     print(f"   Storage      : SQLite → {DB_PATH}")
     print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
 

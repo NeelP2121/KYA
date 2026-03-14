@@ -91,12 +91,24 @@ def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS registered_services (
+                id              TEXT PRIMARY KEY,
+                service_name    TEXT UNIQUE NOT NULL,
+                service_url     TEXT NOT NULL,
+                description     TEXT DEFAULT '',
+                capabilities    TEXT NOT NULL DEFAULT '[]',
+                api_key         TEXT,
+                status          TEXT NOT NULL DEFAULT 'ACTIVE',
+                registered_at   TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON kyc_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_docs_session ON kyc_documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
             CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id);
             CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+            CREATE INDEX IF NOT EXISTS idx_services_name ON registered_services(service_name);
         """)
 
 
@@ -309,3 +321,46 @@ def audit(event: str, user_id: Optional[str] = None, session_id: Optional[str] =
             "VALUES (?, ?, ?, ?, ?, ?)",
             (new_id(), user_id, session_id, event, json.dumps(detail or {}), now_iso())
         )
+
+
+# ──────────────────────────────────────────────
+# Registered Services operations
+# ──────────────────────────────────────────────
+
+def register_service(service_name, service_url, description, capabilities, api_key=None):
+    sid = new_id()
+    ts = now_iso()
+    with get_connection() as conn:
+        # Check if service already exists
+        existing = conn.execute(
+            "SELECT * FROM registered_services WHERE service_name = ?",
+            (service_name,)
+        ).fetchone()
+        if existing:
+            return dict(existing)  # Return existing registration
+        conn.execute(
+            "INSERT INTO registered_services "
+            "(id, service_name, service_url, description, capabilities, api_key, status, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?)",
+            (sid, service_name, service_url, description, json.dumps(capabilities), api_key, ts)
+        )
+    return get_service_by_id(sid)
+
+def get_service_by_id(service_id):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM registered_services WHERE id = ?", (service_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+    return d
+
+def get_service_by_name(service_name):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM registered_services WHERE service_name = ?", (service_name,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+    return d
+
