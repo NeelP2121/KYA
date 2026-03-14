@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #111111;
+  --color-accent: #F5F5F5;
+  --font-sans: 'Inter', sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: theme('colors.white');
+    color: theme('colors.primary');
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background-color: color-mix(in srgb, theme('colors.white') 80%, transparent);
+    backdrop-filter: blur(12px);
+    border: 1px solid color-mix(in srgb, theme('colors.white') 20%, transparent);
+    box-shadow: theme('boxShadow.xl');
+  }
+
+  .product-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: theme('borderRadius.2xl');
+    background-color: theme('colors.accent');
+    transition: all 500ms;
+    cursor: pointer;
+  }
+
+  .product-card:hover {
+    box-shadow: theme('boxShadow.2xl');
+    transform: translateY(-0.5rem);
+  }
+
+  .product-image {
+    width: 100%;
+    height: 20rem;
+    object-fit: cover;
+    object-position: center;
+    transition: transform 700ms;
+  }
+  
+  .product-card:hover .product-image {
+    transform: scale(1.1);
+  }
+}
