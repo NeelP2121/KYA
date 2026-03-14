@@ -1,82 +1,103 @@
 """
-Agent Registry database layer.
-Uses SQLite to store the mapping of User ID to their Unique Agent ID.
+Registry Database Layer.
+Stores the mapping of KYC user_id → unique agent_id.
+Agent IDs are issued only upon successful KYC verification.
 """
 
 import os
 import sqlite3
-import hashlib
 import uuid
-import re
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path(
-    os.environ.get(
-        "AGENT_REGISTRY_DB_PATH",
-        str(Path(__file__).parent.parent / "agent_registry.db"),
-    )
-)
-SALT = "pinelabs_kya_secret_salt_2026"
+REGISTRY_DB_PATH = Path(__file__).parent.parent / "agent_registry.db"
+
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(REGISTRY_DB_PATH))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
+
 def init_registry_db():
-    """Create the registry table if it doesn't exist."""
+    """Create the agent_registry table if it doesn't exist."""
     with get_connection() as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS registered_agents (
-                agent_id    TEXT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS agent_registry (
+                id          TEXT PRIMARY KEY,
                 user_id     TEXT UNIQUE NOT NULL,
+                agent_id    TEXT UNIQUE NOT NULL,
                 full_name   TEXT NOT NULL,
-                email       TEXT,
+                email       TEXT NOT NULL,
                 phone       TEXT,
                 created_at  TEXT NOT NULL
             )
         """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_registry_user ON agent_registry(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_registry_agent ON agent_registry(agent_id)"
+        )
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
-def generate_unique_agent_id(full_name: str) -> str:
+def _generate_agent_id(user_id: str, full_name: str) -> str:
     """
-    Generate an ID: name_agent-[uuid_with_salt]@pinelabsUPAI
-    The name is stripped of spaces and special chars, lowercase.
-    The unique part is a short hash of (uuid4 + salt).
+    Generate a unique agent ID for a user.
+    Format: <name_slug>_agent-<hash>@pinelabsUPAI
     """
-    # Clean the name: keep only alphanumeric, lowercase
-    clean_name = re.sub(r'[^a-zA-Z0-9]', '', full_name).lower()
-    if not clean_name:
-        clean_name = "user"
-        
-    # Generate unique hash portion (first 8 chars of SHA256 of uuid + salt)
-    unique_base = str(uuid.uuid4()) + SALT
-    hash_hex = hashlib.sha256(unique_base.encode('utf-8')).hexdigest()[:8]
+    import re
+    # Cleaned: alphanumeric only, lowercase, spaces removed
+    cleaned_name = re.sub(r'[^a-z0-9]', '', full_name.lower())
+    name_slug = cleaned_name if cleaned_name else "user"
     
-    return f"{clean_name}_agent-{hash_hex}@pinelabsUPAI"
+    salt = "pinelabs_kya_secret_salt_2026"
+    raw_str = f"{uuid.uuid4()}{salt}"
+    unique_part = hashlib.sha256(raw_str.encode()).hexdigest()[:8]
+    
+    return f"{name_slug}_agent-{unique_part}@pinelabsUPAI"
 
-def create_agent(user_id: str, full_name: str, email: str, phone: Optional[str]) -> dict:
-    """Generate and store a new agent ID for a user. Returns the agent record."""
-    agent_id = generate_unique_agent_id(full_name)
+
+
+def create_agent(user_id: str, full_name: str, email: str, phone: Optional[str] = None) -> dict:
+    agent_id = _generate_agent_id(user_id, full_name)
+    record_id = str(uuid.uuid4())
+    ts = datetime.now(timezone.utc).isoformat()
+
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO registered_agents (agent_id, user_id, full_name, email, phone, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (agent_id, user_id, full_name, email, phone, now_iso())
+            "INSERT OR IGNORE INTO agent_registry "
+            "(id, user_id, agent_id, full_name, email, phone, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (record_id, user_id, agent_id, full_name, email, phone, ts)
         )
+
     return get_agent_by_user_id(user_id)
+
 
 def get_agent_by_user_id(user_id: str) -> Optional[dict]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM registered_agents WHERE user_id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM agent_registry WHERE user_id = ?", (user_id,)
+        ).fetchone()
     return dict(row) if row else None
+
 
 def get_agent_by_agent_id(agent_id: str) -> Optional[dict]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM registered_agents WHERE agent_id = ?", (agent_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM agent_registry WHERE agent_id = ?", (agent_id,)
+        ).fetchone()
     return dict(row) if row else None
+
+
+def list_all_agents() -> list[dict]:
+    """Return all registered agents."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM agent_registry ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
