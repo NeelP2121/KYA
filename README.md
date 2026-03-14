@@ -30,8 +30,7 @@ This server exposes KYC verification as **MCP tools** — structured, callable f
 **What it does:**
 - Registers users and manages their KYC lifecycle
 - Registers customer-controlled agents and verifies their routing eligibility
-- Verifies identity documents (Aadhaar, PAN, Mobile) against a mock DigiLocker
-- Enforces a multi-step flow: document submission → OTP confirmation → verification
+- Supports a simplified phone-first KYC flow with dummy OTP confirmation
 - Stores all results and a full audit trail in SQLite (`kyc_store.db`)
 - Automatically triggers a unique **Agent ID** generation bounded to the user upon verification completion and saves this in `agent_registry.db`.
 - Exposes everything as 12 MCP tools over HTTP/SSE
@@ -134,7 +133,7 @@ There are two flows: **Initial KYC** for new users, and **Re-verification** for 
 
   STEP 1 — Register
   ─────────────────
-  Call: register_user(full_name, email, phone?)
+  Call: register_user(phone, full_name?, email?)
   
   → Creates a user record in the DB
   → Returns user_id
@@ -146,21 +145,11 @@ There are two flows: **Initial KYC** for new users, and **Re-verification** for 
 
   STEP 2 — Initiate KYC
   ──────────────────────
-  Call: initiate_kyc(user_id, documents_json)
+  Call: initiate_kyc(user_id)
   
-  documents_json is a JSON string like:
-  {
-    "AADHAAR": {"aadhaar_number": "999999999999"},
-    "PAN":     {"pan_number": "ABCDE1234F"},
-    "MOBILE":  {"mobile_number": "9876543210"}
-  }
-  
-  → Validates format of every document supplied
   → Creates a KYC session (status: OTP_PENDING)
   → Returns session_id
   → KYC status set to: INITIATED
-  
-  ⚠️  Documents are NOT verified yet. OTP must be confirmed first.
 
          │
          ▼
@@ -169,11 +158,11 @@ There are two flows: **Initial KYC** for new users, and **Re-verification** for 
   ─────────────────────
   Call: confirm_kyc_otp(user_id, session_id, otp)
   
-  Fixed OTP for mock: 421596
+  Any non-empty OTP works in the simplified mock flow
   OTP is valid for 10 minutes from session creation.
   
-  On wrong OTP  → error returned, session stays OTP_PENDING, retry allowed
-  On correct OTP → document verification runs immediately
+  On empty OTP  → error returned, session stays OTP_PENDING, retry allowed
+  On any non-empty OTP → user is marked VERIFIED and an agent ID is generated
   
          │
          ├─── All docs pass? ──► KYC status = VERIFIED ✅
@@ -405,13 +394,13 @@ Register a new user. Does not start KYC.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
-| `full_name` | string | ✅ | Full legal name as it appears on government ID |
-| `email` | string | ✅ | Unique email address |
-| `phone` | string | — | 10-digit Indian mobile number |
+| `phone` | string | ✅ | 10-digit Indian mobile number |
+| `full_name` | string | — | Optional display name |
+| `email` | string | — | Optional email |
 
 ```json
 // Request
-{"full_name": "Rahul Sharma", "email": "rahul@example.com", "phone": "9876543210"}
+{"phone": "9876543210", "full_name": "Rahul Sharma"}
 
 // Response
 {
@@ -424,40 +413,33 @@ Register a new user. Does not start KYC.
 ---
 
 ### `initiate_kyc`
-Step 1 of KYC. Validates document formats and creates a session.
+Step 1 of KYC. Starts the simplified phone-based OTP flow.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `user_id` | string | ✅ | UUID from `register_user` |
-| `documents_json` | string | ✅ | JSON-encoded document map (see below) |
+| `documents_json` | string | — | Ignored in the simplified flow; kept for backward compatibility |
 
 ```json
-// documents_json value (must be JSON-encoded as a string)
-{
-  "AADHAAR": {"aadhaar_number": "999999999999"},
-  "PAN":     {"pan_number": "ABCDE1234F"},
-  "MOBILE":  {"mobile_number": "9876543210"}
-}
-
 // Response
 {
   "success": true,
   "session_id": "<uuid>",
-  "documents_received": ["AADHAAR", "PAN", "MOBILE"],
-  "otp_instruction": "Submit OTP via confirm_kyc_otp. Session valid for 10 minutes."
+  "documents_received": [],
+  "otp_instruction": "Submit any OTP via confirm_kyc_otp. Session valid for 10 minutes."
 }
 ```
 
 ---
 
 ### `confirm_kyc_otp`
-Step 2 of KYC. Verifies OTP and runs all document checks.
+Step 2 of KYC. Accepts any non-empty OTP and completes verification.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `user_id` | string | ✅ | User UUID |
 | `session_id` | string | ✅ | Session UUID from `initiate_kyc` |
-| `otp` | string | ✅ | 6-digit OTP (mock: `421596`) |
+| `otp` | string | ✅ | Any non-empty value |
 
 ```json
 // Response (success)
@@ -591,8 +573,8 @@ Register a customer-controlled agent with AR before routing traffic to an ecomme
 ```json
 // Request
 {
-  "user_id": "<uuid>",
   "agent_name": "Rahul Shopper Agent",
+  "phone": "9876543210",
   "description": "Customer-controlled ecommerce agent",
   "capabilities_json": "[\"ECOMMERCE_ACCESS\", \"CHECKOUT\"]"
 }
@@ -691,7 +673,7 @@ Format rules: `AAAAA9999A` — 5 uppercase letters, 4 digits, 1 uppercase letter
 Format rules: 10 digits, must start with 6–9. `+91` or `0` prefix is stripped automatically.
 
 ### OTP
-Fixed value: **`421596`** — valid for **10 minutes** from session creation.
+Any non-empty OTP is accepted — valid for **10 minutes** from session creation.
 
 ### Name Matching
 The registered `full_name` must share at least one token (word) with the name on the document record. Matching is case-insensitive. Examples:

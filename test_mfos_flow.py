@@ -142,7 +142,7 @@ def run_mfos_tests():
     res = client.call_tool("verify_and_generate_id", {
         "user_id": kyc_uid,
         "session_id": sid,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     
     agent_id = res["agent_id"]

@@ -57,7 +57,7 @@ async def run() -> None:
             register_user = await call_json_tool(
                 ar_session,
                 "register_user",
-                {"full_name": "Test Buyer", "email": email, "phone": "9876543210"},
+                {"phone": "9876543210", "full_name": "Test Buyer", "email": email},
             )
             user_id = register_user["user"]["user_id"]
             print(f"[PASS] register_user -> {user_id}")
@@ -65,20 +65,15 @@ async def run() -> None:
             initiate_kyc = await call_json_tool(
                 ar_session,
                 "initiate_kyc",
-                {
-                    "user_id": user_id,
-                    "documents_json": json.dumps(
-                        {"AADHAAR": {"aadhaar_number": "999999999999"}}
-                    ),
-                },
+                {"user_id": user_id},
             )
-            session_id = initiate_kyc["session"]["session_id"]
+            session_id = initiate_kyc["session_id"]
             print(f"[PASS] initiate_kyc -> {session_id}")
 
             confirm_kyc = await call_json_tool(
                 ar_session,
                 "confirm_kyc_otp",
-                {"user_id": user_id, "session_id": session_id, "otp": "421596"},
+                {"user_id": user_id, "session_id": session_id, "otp": "000000"},
             )
             print(f"[PASS] confirm_kyc_otp -> {confirm_kyc['kyc_status']}")
 

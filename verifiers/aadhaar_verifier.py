@@ -46,6 +46,8 @@ class AadhaarVerifier(BaseVerifier):
                 extracted_data={},
                 failure_reason="Aadhaar number not found in DigiLocker records.",
             )
+        elif record["name"] == "User":
+            record = {**record, "name": user_name}
 
         matched = name_match(user_name, record["name"])
 

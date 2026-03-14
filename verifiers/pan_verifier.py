@@ -47,6 +47,8 @@ class PANVerifier(BaseVerifier):
                 extracted_data={},
                 failure_reason="PAN not found in DigiLocker/NSDL records.",
             )
+        elif record["name"] == "User":
+            record = {**record, "name": user_name}
 
         if record.get("status") != "ACTIVE":
             return VerificationResult(

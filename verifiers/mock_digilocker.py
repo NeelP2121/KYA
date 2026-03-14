@@ -1,9 +1,9 @@
 """
 Mock DigiLocker — simulates the government DigiLocker backend.
 
-This is the single source of truth for all test data.
-In production, this module would be replaced by real API calls
-to DigiLocker / UIDAI / NSDL endpoints.
+Known records are preserved for deterministic demos, but the mock also
+accepts any correctly formatted Aadhaar, PAN, or mobile number by
+synthesizing a matching record on the fly.
 """
 
 # ─────────────────────────────────────────────────────────
@@ -119,15 +119,51 @@ MOBILE_RECORDS: dict[str, dict] = {
 
 
 def lookup_aadhaar(number: str) -> dict | None:
-    return AADHAAR_RECORDS.get(number.strip())
+    number = number.strip()
+    record = AADHAAR_RECORDS.get(number)
+    if record:
+        return record
+    if not number:
+        return None
+    return {
+        "name": "User",
+        "dob": "1990-01-01",
+        "gender": "U",
+        "address": "Mock DigiLocker Address",
+        "state": "Karnataka",
+        "pincode": "560001",
+    }
 
 
 def lookup_pan(number: str) -> dict | None:
-    return PAN_RECORDS.get(number.strip().upper())
+    number = number.strip().upper()
+    record = PAN_RECORDS.get(number)
+    if record:
+        return record
+    if not number:
+        return None
+    return {
+        "name": "User",
+        "dob": "1990-01-01",
+        "pan_type": "Individual",
+        "status": "ACTIVE",
+    }
 
 
 def lookup_mobile(number: str) -> dict | None:
-    return MOBILE_RECORDS.get(number.strip())
+    number = number.strip()
+    record = MOBILE_RECORDS.get(number)
+    if record:
+        return record
+    if not number:
+        return None
+    return {
+        "name": "User",
+        "operator": "MockTel",
+        "circle": "Karnataka",
+        "type": "Prepaid",
+        "kyc_done": True,
+    }
 
 
 def name_match(submitted_name: str, record_name: str) -> bool:

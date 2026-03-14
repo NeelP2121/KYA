@@ -242,12 +242,12 @@ def run_tests():
 
     # ── 9. verify_and_generate_id — correct OTP ──────────
     print("=" * 55)
-    print("TEST 9 — verify_and_generate_id (OTP 421596 → VERIFIED + agent_id)")
+    print("TEST 9 — verify_and_generate_id (OTP 123456 → VERIFIED + agent_id)")
     print("=" * 55)
     res = client.call_tool("verify_and_generate_id", {
         "user_id": USER_ID,
         "session_id": SESSION_ID,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     print(json.dumps(res, indent=2))
     assert res["success"]
@@ -300,7 +300,7 @@ def run_tests():
     res = client.call_tool("verify_and_generate_id", {
         "user_id": USER_ID,
         "session_id": new_session,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     assert res["kyc_status"] == "VERIFIED"
     print(f"✅ Re-verify result: {res['kyc_status']}\n")

@@ -49,6 +49,8 @@ class MobileVerifier(BaseVerifier):
                 extracted_data={},
                 failure_reason="Mobile number not found in telecom KYC registry.",
             )
+        elif record["name"] == "User":
+            record = {**record, "name": user_name}
 
         if not record.get("kyc_done"):
             return VerificationResult(

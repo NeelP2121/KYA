@@ -33,8 +33,9 @@ mcp = FastMCP(
     name="kyc-mcp-server",
     instructions=(
         "This server provides KYC (Know Your Customer) verification tools. "
-        "Typical flow: register_user → initiate_kyc → confirm_kyc_otp → fetch_verified_profile. "
-        "After KYC is VERIFIED, use register_agent to issue an AR-managed agent_id for a customer-controlled agent. "
+        "Typical flow: register_user(phone) → initiate_kyc → confirm_kyc_otp → fetch_verified_profile. "
+        "The simplified mock flow only requires a phone number and accepts any OTP. "
+        "After KYC is VERIFIED, use register_agent with the same phone number or user_id to issue an AR-managed agent_id for a customer-controlled agent. "
         "For ecommerce via Claude Desktop, register a shopping agent first and then pass that agent_id to the ecommerce MCP. "
         "Use verify_agent_capability before routing any request to an ecommerce MCP. "
         "Use re_verify_kyc to update or replace documents for an existing user. "
@@ -51,14 +52,14 @@ mcp = FastMCP(
 # ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def register_user(full_name: str, email: str, phone: str = "") -> str:
+def register_user(phone: str, full_name: str = "", email: str = "") -> str:
     """
-    Register a new user in the KYC system.
+    Register a new user in the simplified KYC system.
 
     Args:
-        full_name: User's full legal name (as it appears on government ID).
-        email:     Unique email address for the user.
-        phone:     Optional phone number (10-digit Indian mobile, e.g. 9876543210).
+        phone:     Required phone number.
+        full_name: Optional display name. Auto-generated from phone when omitted.
+        email:     Optional email. Auto-generated when omitted.
 
     Returns:
         JSON with user_id and next steps.
@@ -76,31 +77,18 @@ def register_user(full_name: str, email: str, phone: str = "") -> str:
 # ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def initiate_kyc(user_id: str, documents_json: str) -> str:
+def initiate_kyc(user_id: str, documents_json: str = "") -> str:
     """
-    Step 1 of KYC: Submit documents and initiate a KYC session.
-    An OTP will need to be confirmed before documents are verified.
+    Step 1 of KYC: start the simplified phone-based OTP flow.
 
     Args:
         user_id:        The user_id returned by register_user.
-        documents_json: JSON string mapping doc_type to its fields. Examples:
-                        {
-                          "AADHAAR": {"aadhaar_number": "999999999999"},
-                          "PAN":     {"pan_number": "ABCDE1234F"},
-                          "MOBILE":  {"mobile_number": "9876543210"}
-                        }
-                        Supported doc types: AADHAAR, PAN, MOBILE.
-                        Call list_supported_document_types for full details.
+        documents_json: Ignored in the simplified flow. Optional for backward compatibility.
 
     Returns:
         JSON with session_id and OTP instructions.
     """
-    try:
-        documents = json.loads(documents_json)
-    except json.JSONDecodeError as e:
-        return json.dumps({"success": False, "error": f"Invalid documents_json: {e}"})
-
-    result = svc.initiate_kyc(user_id=user_id, documents=documents)
+    result = svc.initiate_kyc(user_id=user_id, documents={})
     return json.dumps(result, indent=2)
 
 
@@ -111,16 +99,15 @@ def initiate_kyc(user_id: str, documents_json: str) -> str:
 @mcp.tool()
 def confirm_kyc_otp(user_id: str, session_id: str, otp: str) -> str:
     """
-    Step 2 of KYC: Confirm OTP to trigger document verification.
-    This is the final step — KYC status will be set to VERIFIED or FAILED.
+    Step 2 of KYC: Confirm any non-empty OTP to complete verification.
 
     Args:
         user_id:    The user's ID.
         session_id: The session_id returned by initiate_kyc or re_verify_kyc.
-        otp:        The 6-digit OTP provided to the user.
+        otp:        Any non-empty OTP value.
 
     Returns:
-        JSON with KYC status and per-document verification results.
+        JSON with KYC status and generated registry agent_id.
     """
     result = svc.confirm_kyc_otp(user_id=user_id, session_id=session_id, otp=otp)
     return json.dumps(result, indent=2)
@@ -295,8 +282,9 @@ def list_supported_document_types() -> str:
 
 @mcp.tool()
 def register_agent(
-    user_id: str,
     agent_name: str,
+    user_id: str = "",
+    phone: str = "",
     description: str = "",
     capabilities_json: str = "",
 ) -> str:
@@ -304,8 +292,9 @@ def register_agent(
     Register a customer-controlled agent with AR.
 
     Args:
-        user_id:           The AR user who owns this agent.
         agent_name:        Display name for the agent.
+        user_id:           Optional AR user_id. If omitted, phone can be used instead.
+        phone:             Optional phone number to look up the verified user.
         description:       Optional plain-language description.
         capabilities_json: Optional JSON array of allowed capabilities, for example:
                            ["ECOMMERCE_ACCESS", "CHECKOUT", "PAYMENT"]
@@ -331,6 +320,7 @@ def register_agent(
         agent_name=agent_name,
         description=description,
         capabilities=capabilities,
+        phone=phone,
     )
     return json.dumps(result, indent=2)
 
@@ -420,7 +410,7 @@ if __name__ == "__main__":
         print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
         print(f"   Tools        : {tool_count} tools registered")
         print(f"   Storage      : SQLite → {DB_PATH}")
-        print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
+        print(f"   OTP          : Dummy (any non-empty value), valid {OTP_VALIDITY_MINUTES} min")
         mcp.run(transport="sse")
     else:
         # Default: stdio transport (for Claude Desktop)

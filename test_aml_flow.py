@@ -147,7 +147,7 @@ def run():
                        "documents_json": json.dumps({"AADHAAR": {"aadhaar_number": "999999999999"}})}, req); req += 1
     sid = res["session_id"]
 
-    res = client.call("verify_and_generate_id", {"user_id": uid, "session_id": sid, "otp": "421596"}, req); req += 1
+    res = client.call("verify_and_generate_id", {"user_id": uid, "session_id": sid, "otp": "123456"}, req); req += 1
     agent_id = res["agent_id"]
 
     res = client.call("onboard_merchant", {

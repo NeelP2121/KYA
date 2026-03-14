@@ -148,6 +148,12 @@ def get_user_by_email(email: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_user_by_phone(phone: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
+    return dict(row) if row else None
+
+
 def update_user_kyc_status(user_id: str, status: str):
     with get_connection() as conn:
         conn.execute(

@@ -189,7 +189,7 @@ def run_registry_tests():
     res = client.call_tool("verify_and_generate_id", {
         "user_id": uid_a,
         "session_id": sid_a,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     assert res["success"], res
     assert res["kyc_status"] == "VERIFIED"
@@ -233,7 +233,7 @@ def run_registry_tests():
     res = client.call_tool("verify_and_generate_id", {
         "user_id": uid_a,
         "session_id": new_sid,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     assert res["success"], res
     assert res["agent_id"] == agent_id_a, (
@@ -280,7 +280,7 @@ def run_registry_tests():
     res = client.call_tool("verify_and_generate_id", {
         "user_id": uid_b,
         "session_id": sid_b,
-        "otp": "421596"
+        "otp": "123456"
     }, req_id=req); req += 1
     assert res["success"], res
     agent_id_b = res["agent_id"]
