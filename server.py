@@ -143,6 +143,47 @@ def check_kyc_status(user_id: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────
+# Tool 4A — verify_and_generate_id
+# ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+def verify_and_generate_id(user_id: str, session_id: str, otp: str) -> str:
+    """
+    Convenience extension tool that confirms the KYC OTP and, upon successful verification,
+    immediately generates and returns the new unique agent ID in the same response.
+
+    Args:
+        user_id:    The user's ID.
+        session_id: The session_id returned by initiate_kyc or re_verify_kyc.
+        otp:        The 6-digit OTP provided to the user.
+
+    Returns:
+        JSON with KYC status and generated agent_id on success.
+    """
+    result = svc.verify_and_generate_id(user_id=user_id, session_id=session_id, otp=otp)
+    return json.dumps(result, indent=2)
+
+# ─────────────────────────────────────────────────────────
+# Tool 4B — get_registered_agent_id
+# ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+def get_registered_agent_id(user_id: str) -> str:
+    """
+    Fetch the unique Agent ID for a fully verified user.
+    The unique ID follows the format: name_agent-[uuid_with_salt]@pinelabsUPAI
+
+    Args:
+        user_id: The user's ID. User must have VERIFIED kyc_status.
+
+    Returns:
+        JSON with the user's generated agent_id.
+    """
+    import registry_service
+    result = registry_service.get_registered_agent_id(user_id=user_id)
+    return json.dumps(result, indent=2)
+
+# ─────────────────────────────────────────────────────────
 # Tool 5 — fetch_verified_profile
 # ─────────────────────────────────────────────────────────
 
@@ -249,8 +290,10 @@ if __name__ == "__main__":
 
     print(f"🚀 KYC MCP Server starting on http://{host}:{port}")
     print(f"   SSE endpoint : http://{host}:{port}/sse")
-    print(f"   Tools        : 8 tools registered")
+    print(f"   Tools        : 10 tools registered")
     print(f"   Storage      : SQLite → kyc_store.db")
     print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
 
-    asyncio.run(mcp.run_sse_async(host=host, port=port))
+    mcp.settings.host = host
+    mcp.settings.port = port
+    asyncio.run(mcp.run_sse_async())

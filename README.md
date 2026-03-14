@@ -31,8 +31,9 @@ This server exposes KYC verification as **MCP tools** — structured, callable f
 - Registers users and manages their KYC lifecycle
 - Verifies identity documents (Aadhaar, PAN, Mobile) against a mock DigiLocker
 - Enforces a multi-step flow: document submission → OTP confirmation → verification
-- Stores all results and a full audit trail in SQLite
-- Exposes everything as 8 clean MCP tools over HTTP/SSE
+- Stores all results and a full audit trail in SQLite (`kyc_store.db`)
+- Automatically triggers a unique **Agent ID** generation bounded to the user upon verification completion and saves this in `agent_registry.db`.
+- Exposes everything as **10 clean MCP tools** over HTTP/SSE
 
 **What it is NOT (yet):**
 - Connected to real UIDAI / NSDL / telecom APIs (mock only)
@@ -44,14 +45,17 @@ This server exposes KYC verification as **MCP tools** — structured, callable f
 
 ```
 kyc_mcp_server/
-├── server.py                  ← MCP server entry point, 8 tools defined here
+├── server.py                  ← MCP server entry point, 10 tools defined here
 ├── kyc_service.py             ← All business logic (tools call this)
+├── registry_service.py        ← Unique Agent ID generation and lookup logic
 ├── otp_service.py             ← OTP verification logic
 ├── test_flow.py               ← End-to-end test script
+├── test_registry_flow.py      ← Agent registry integration test
 ├── requirements.txt
 │
 ├── db/
-│   └── database.py            ← SQLite: schema, migrations, all CRUD
+│   ├── database.py            ← SQLite: core kyc_store.db logic
+│   └── registry.py            ← SQLite: agent_registry.db logic
 │
 └── verifiers/
     ├── base.py                ← BaseVerifier abstract class (plugin contract)
@@ -98,7 +102,7 @@ On success you will see:
 ```
 🚀 KYC MCP Server starting on http://0.0.0.0:8000
    SSE endpoint : http://0.0.0.0:8000/sse
-   Tools        : 8 tools registered
+   Tools        : 10 tools registered
    Storage      : SQLite → kyc_store.db
    OTP          : Fixed (421596), valid 10 min
 ```
@@ -335,6 +339,8 @@ Connect the KYC server to Claude Desktop and drive it entirely with natural lang
 | *"Register a new user named Rahul Sharma with email rahul@test.com"* | Calls `register_user` |
 | *"Start KYC for user \<id\> using Aadhaar 999999999999 and PAN ABCDE1234F"* | Calls `initiate_kyc` |
 | *"Confirm the OTP 421596 for session \<id\>"* | Calls `confirm_kyc_otp` |
+| *"Verify user \<id\> and session \<session_id\> with 421596 and get me their new Agent ID"* | Calls `verify_and_generate_id` |
+| *"What is the unique agent ID for user \<id\>?"* | Calls `get_registered_agent_id` |
 | *"What is the KYC status of user \<id\>?"* | Calls `check_kyc_status` |
 | *"Show me the full verified profile for user \<id\>"* | Calls `fetch_verified_profile` |
 | *"List all users who have been verified"* | Calls `list_registered_users` with filter VERIFIED |
@@ -472,6 +478,39 @@ Step 2 of KYC. Verifies OTP and runs all document checks.
   "success": false,
   "kyc_status": "FAILED",
   "message": "KYC verification failed. Issues: PAN: Name mismatch"
+}
+```
+
+---
+
+### `verify_and_generate_id`
+A convenience wrapper for confirmation. Verifies OTP and documents, and automatically returns the generated `agent_id` string directly inside the response for verified users. Follows the exact same arguments as `confirm_kyc_otp`.
+
+```json
+// Response (success snippet)
+{
+  "success": true,
+  "kyc_status": "VERIFIED",
+  "agent_id": "rahulsharma_agent-565c8f94@pinelabsUPAI"
+}
+```
+
+---
+
+### `get_registered_agent_id`
+Fetch the unique Agent ID for an already `VERIFIED` user out of the registry. Returns the mapped ID string and generation datestamps.
+
+```json
+// Request
+{"user_id": "<uuid>"}
+
+// Response
+{
+  "success": true,
+  "agent_id": "testagentsharma_agent-565c8f94@pinelabsUPAI",
+  "user_id": "<uuid>",
+  "full_name": "Test Agent Sharma",
+  "created_at": "2026-03-14T10:00:00+00:00"
 }
 ```
 
@@ -719,72 +758,44 @@ Done. All 8 tools now support `DRIVING_LICENCE` automatically. No other files ch
 
 ## Database Schema
 
-The SQLite database (`kyc_store.db`) is created automatically on first run.
+The core SQLite database (`kyc_store.db`) is created automatically on first run to manage KYC history and sessions. 
+
+Additionally, a parallel database (`agent_registry.db`) is automatically populated representing the verified Agent mappings.
+
+### Core Database (`kyc_store.db`)
 
 ```sql
 -- User registry
 users (
     id          TEXT PRIMARY KEY,   -- UUID
     full_name   TEXT,
-    email       TEXT UNIQUE,
+... (truncated) ...
+```
+
+### Registry Database (`agent_registry.db`)
+
+```sql
+-- Agent Registry Mapping
+registered_agents (
+    agent_id    TEXT PRIMARY KEY,   -- e.g. rahulsharma_agent-a12b3c4d@pinelabsUPAI
+    user_id     TEXT UNIQUE,        -- UUID from users table
+    full_name   TEXT,
+    email       TEXT,
     phone       TEXT,
-    kyc_status  TEXT,               -- PENDING | INITIATED | VERIFIED | FAILED | BLOCKED
-    created_at  TEXT,
-    updated_at  TEXT
-)
-
--- Each KYC attempt (initial or re-verify)
-kyc_sessions (
-    id              TEXT PRIMARY KEY,
-    user_id         TEXT,
-    session_type    TEXT,           -- INITIAL | RE_VERIFY
-    status          TEXT,           -- OTP_PENDING | OTP_CONFIRMED | DOC_VERIFIED | DOC_FAILED
-    documents       TEXT,           -- JSON blob of submitted documents
-    otp_verified    INTEGER,
-    initiated_at    TEXT,
-    completed_at    TEXT,
-    failure_reason  TEXT
-)
-
--- Per-document verification results
-kyc_documents (
-    id              TEXT PRIMARY KEY,
-    user_id         TEXT,
-    session_id      TEXT,
-    doc_type        TEXT,           -- AADHAAR | PAN | MOBILE
-    doc_number      TEXT,           -- masked (e.g. XXXX-XXXX-1234)
-    verified        INTEGER,
-    verify_result   TEXT,           -- JSON: full verifier response
-    verified_at     TEXT
-)
-
--- Full event audit trail
-audit_log (
-    id          TEXT PRIMARY KEY,
-    user_id     TEXT,
-    session_id  TEXT,
-    event       TEXT,               -- USER_REGISTERED | KYC_INITIATED | OTP_CONFIRMED | etc.
-    detail      TEXT,               -- JSON blob
-    timestamp   TEXT
+    created_at  TEXT
 )
 ```
 
 **Useful queries:**
 
 ```bash
+# Agent mapping retrieval
+sqlite3 agent_registry.db
+SELECT agent_id, user_id, full_name FROM registered_agents;
+
+# General session retrieval
 sqlite3 kyc_store.db
-
--- All users and their KYC status
 SELECT full_name, email, kyc_status, created_at FROM users;
-
--- Full audit trail for a specific user
-SELECT event, detail, timestamp FROM audit_log WHERE user_id = '<uuid>' ORDER BY timestamp;
-
--- All sessions and outcomes
-SELECT session_type, status, failure_reason, initiated_at FROM kyc_sessions;
-
--- All verified documents
-SELECT doc_type, doc_number, verified_at FROM kyc_documents WHERE verified = 1;
 ```
 
 ---
