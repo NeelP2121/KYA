@@ -555,6 +555,79 @@ def verify_agent_capability(
 
 
 # ─────────────────────────────────────────────────────────
+# Tool 11 — register_service
+# ─────────────────────────────────────────────────────────
+
+def register_service(service_name: str, service_url: str, description: str = "",
+                     capabilities: list[str] | None = None) -> dict:
+    """Register an ecommerce or other service with AR."""
+    service_name = service_name.strip()
+    service_url = service_url.strip()
+    if not service_name:
+        return _err("service_name is required.")
+    if not service_url:
+        return _err("service_url is required.")
+
+    caps = capabilities or ["ECOMMERCE"]
+    service = kyc_db.register_service(service_name, service_url, description, caps)
+    kyc_db.audit("SERVICE_REGISTERED", detail={"service_name": service_name, "service_url": service_url})
+
+    return {
+        "success": True,
+        "message": f"Service '{service_name}' registered with AR.",
+        "service": {
+            "service_id": service["id"],
+            "service_name": service["service_name"],
+            "service_url": service["service_url"],
+            "capabilities": service["capabilities"],
+            "status": service["status"],
+        }
+    }
+
+def verify_traffic(agent_id: str, service_name: str) -> dict:
+    """
+    Verify that an agent is allowed to access a specific registered service.
+    Checks: agent exists, is active, has matching capability.
+    """
+    agent_id = agent_id.strip()
+    service_name = service_name.strip()
+
+    if not agent_id:
+        return {"success": False, "allowed": False, "reason": "agent_id is required"}
+    if not service_name:
+        return {"success": False, "allowed": False, "reason": "service_name is required"}
+
+    # Check service exists
+    service = kyc_db.get_service_by_name(service_name)
+    if not service:
+        return {"success": False, "allowed": False, "reason": f"Service '{service_name}' not registered with AR"}
+
+    # Check agent exists and is active
+    agent = kyc_db.get_agent_by_id(agent_id)
+    if not agent:
+        return {"success": False, "allowed": False, "reason": "Agent not registered with AR"}
+    if agent["status"] != "ACTIVE":
+        return {"success": False, "allowed": False, "reason": "Agent is not active"}
+
+    # Check capability match — agent needs ECOMMERCE_ACCESS for ecommerce services
+    required_cap = "ECOMMERCE_ACCESS"
+    if required_cap not in agent["capabilities"]:
+        return {"success": False, "allowed": False,
+                "reason": f"Agent lacks {required_cap} capability"}
+
+    kyc_db.audit("TRAFFIC_VERIFIED", user_id=agent["user_id"],
+                 detail={"agent_id": agent_id, "service": service_name, "decision": "ALLOW"})
+
+    return {
+        "success": True,
+        "allowed": True,
+        "agent_id": agent_id,
+        "agent_name": agent["agent_name"],
+        "service_name": service_name,
+        "message": f"Agent verified for {service_name}."
+    }
+
+# ─────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────
 
