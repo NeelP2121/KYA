@@ -3,6 +3,7 @@ Database layer for KYC MCP Server.
 Uses SQLite with full audit trail support.
 """
 
+import os
 import sqlite3
 import json
 import uuid
@@ -10,7 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path(__file__).parent.parent / "kyc_store.db"
+DB_PATH = Path(
+    os.environ.get(
+        "KYC_DB_PATH",
+        str(Path(__file__).parent.parent / "kyc_store.db"),
+    )
+)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -72,10 +78,25 @@ def init_db():
                 timestamp   TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS agents (
+                id              TEXT PRIMARY KEY,
+                user_id         TEXT NOT NULL REFERENCES users(id),
+                agent_name      TEXT NOT NULL,
+                description     TEXT NOT NULL DEFAULT '',
+                capabilities    TEXT NOT NULL DEFAULT '[]',
+                status          TEXT NOT NULL DEFAULT 'ACTIVE',
+                -- ACTIVE | REVOKED
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON kyc_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_docs_session ON kyc_documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+            CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id);
+            CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
         """)
 
 
@@ -243,6 +264,38 @@ def get_documents_for_user(user_id: str) -> list[dict]:
         d["verify_result"] = json.loads(d["verify_result"]) if d["verify_result"] else {}
         result.append(d)
     return result
+
+
+# ──────────────────────────────────────────────
+# Agent operations
+# ──────────────────────────────────────────────
+
+def create_agent(
+    user_id: str,
+    agent_name: str,
+    description: str,
+    capabilities: list[str],
+) -> dict:
+    aid = new_id()
+    ts = now_iso()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO agents "
+            "(id, user_id, agent_name, description, capabilities, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)",
+            (aid, user_id, agent_name, description, json.dumps(capabilities), ts, ts)
+        )
+    return get_agent_by_id(aid)
+
+
+def get_agent_by_id(agent_id: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    if not row:
+        return None
+    agent = dict(row)
+    agent["capabilities"] = json.loads(agent["capabilities"]) if agent["capabilities"] else []
+    return agent
 
 
 # ──────────────────────────────────────────────

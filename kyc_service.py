@@ -11,6 +11,8 @@ from otp_service import verify_otp, FIXED_OTP, OTP_VALIDITY_MINUTES
 import registry_service
 
 
+DEFAULT_AGENT_CAPABILITIES = ["ECOMMERCE_ACCESS"]
+
 
 # ─────────────────────────────────────────────────────────
 # Tool 1 — register_user
@@ -399,6 +401,160 @@ def list_supported_document_types() -> dict:
 
 
 # ─────────────────────────────────────────────────────────
+# Tool 9 — register_agent
+# ─────────────────────────────────────────────────────────
+
+def register_agent(
+    user_id: str,
+    agent_name: str,
+    description: str = "",
+    capabilities: list[str] | None = None,
+) -> dict:
+    """
+    Register a customer-controlled agent with AR so it can be verified before
+    traffic is forwarded to another MCP server such as an ecommerce server.
+    """
+    user = kyc_db.get_user_by_id(user_id)
+    if not user:
+        return _err(
+            f"User '{user_id}' not found. Register the customer with register_user first."
+        )
+
+    agent_name = agent_name.strip()
+    if not agent_name:
+        return _err("agent_name is required.")
+
+    normalized_capabilities = _normalize_capabilities(capabilities)
+    agent = kyc_db.create_agent(
+        user_id=user_id,
+        agent_name=agent_name,
+        description=description.strip(),
+        capabilities=normalized_capabilities,
+    )
+    kyc_db.audit(
+        "AGENT_REGISTERED",
+        user_id=user_id,
+        detail={
+            "agent_id": agent["id"],
+            "agent_name": agent_name,
+            "capabilities": normalized_capabilities,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": (
+            "Agent registered with AR. Use verify_agent_capability before "
+            "routing ecommerce traffic for this agent."
+        ),
+        "agent": _safe_agent(agent),
+        "next_step": "Call verify_agent_capability with this agent_id before ecommerce routing.",
+    }
+
+
+# ─────────────────────────────────────────────────────────
+# Tool 10 — verify_agent_capability
+# ─────────────────────────────────────────────────────────
+
+def verify_agent_capability(
+    agent_id: str,
+    capability: str = "ECOMMERCE_ACCESS",
+) -> dict:
+    """
+    Check whether an agent is registered with AR and allowed to be routed to an
+    ecommerce MCP. If the agent is unknown, instruct the client to register first.
+    """
+    agent_id = agent_id.strip()
+    requested_capability = capability.strip().upper() or "ECOMMERCE_ACCESS"
+
+    if not agent_id:
+        return {
+            "success": False,
+            "allowed_to_route": False,
+            "route_decision": "BLOCK_REGISTER_AGENT",
+            "registration_required": True,
+            "message": (
+                "Agent is not registered with AR. Please register the agent first "
+                "before routing traffic to the ecommerce MCP."
+            ),
+            "next_step": "Call register_agent to obtain an AR-managed agent_id.",
+        }
+
+    agent = kyc_db.get_agent_by_id(agent_id)
+    if not agent:
+        kyc_db.audit(
+            "AGENT_ROUTING_BLOCKED",
+            detail={"agent_id": agent_id, "capability": requested_capability, "reason": "NOT_REGISTERED"},
+        )
+        return {
+            "success": False,
+            "allowed_to_route": False,
+            "route_decision": "BLOCK_REGISTER_AGENT",
+            "registration_required": True,
+            "message": (
+                "Agent is not registered with AR. Please register the agent first "
+                "before routing traffic to the ecommerce MCP."
+            ),
+            "next_step": "Call register_agent to obtain an AR-managed agent_id.",
+        }
+
+    if agent["status"] != "ACTIVE":
+        kyc_db.audit(
+            "AGENT_ROUTING_BLOCKED",
+            user_id=agent["user_id"],
+            detail={"agent_id": agent_id, "capability": requested_capability, "reason": "INACTIVE"},
+        )
+        return {
+            "success": False,
+            "allowed_to_route": False,
+            "route_decision": "BLOCK_AGENT_INACTIVE",
+            "registration_required": False,
+            "message": "Agent is registered with AR but is not active.",
+            "agent": _safe_agent(agent),
+        }
+
+    if requested_capability not in agent["capabilities"]:
+        kyc_db.audit(
+            "AGENT_ROUTING_BLOCKED",
+            user_id=agent["user_id"],
+            detail={
+                "agent_id": agent_id,
+                "capability": requested_capability,
+                "reason": "CAPABILITY_MISSING",
+            },
+        )
+        return {
+            "success": False,
+            "allowed_to_route": False,
+            "route_decision": "BLOCK_CAPABILITY_MISSING",
+            "registration_required": False,
+            "message": (
+                f"Agent is registered with AR but does not have capability "
+                f"'{requested_capability}'."
+            ),
+            "agent": _safe_agent(agent),
+            "requested_capability": requested_capability,
+        }
+
+    kyc_db.audit(
+        "AGENT_ROUTING_ALLOWED",
+        user_id=agent["user_id"],
+        detail={"agent_id": agent_id, "capability": requested_capability},
+    )
+    return {
+        "success": True,
+        "allowed_to_route": True,
+        "route_decision": "ALLOW",
+        "registration_required": False,
+        "message": (
+            "Agent is registered with AR and may be routed to the ecommerce MCP."
+        ),
+        "agent": _safe_agent(agent),
+        "verified_capability": requested_capability,
+    }
+
+
+# ─────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────
 
@@ -417,3 +573,30 @@ def _safe_user(user: dict) -> dict:
         "created_at": user["created_at"],
         "updated_at": user["updated_at"],
     }
+
+
+def _safe_agent(agent: dict) -> dict:
+    return {
+        "agent_id": agent["id"],
+        "user_id": agent["user_id"],
+        "agent_name": agent["agent_name"],
+        "description": agent["description"],
+        "capabilities": agent["capabilities"],
+        "status": agent["status"],
+        "created_at": agent["created_at"],
+        "updated_at": agent["updated_at"],
+    }
+
+
+def _normalize_capabilities(capabilities: list[str] | None) -> list[str]:
+    raw = capabilities or DEFAULT_AGENT_CAPABILITIES
+    normalized: list[str] = []
+
+    for capability in raw:
+        if capability is None:
+            continue
+        value = str(capability).strip().upper()
+        if value and value not in normalized:
+            normalized.append(value)
+
+    return normalized or DEFAULT_AGENT_CAPABILITIES.copy()

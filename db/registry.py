@@ -3,6 +3,7 @@ Agent Registry database layer.
 Uses SQLite to store the mapping of User ID to their Unique Agent ID.
 """
 
+import os
 import sqlite3
 import hashlib
 import uuid
@@ -11,7 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path(__file__).parent.parent / "agent_registry.db"
+DB_PATH = Path(
+    os.environ.get(
+        "AGENT_REGISTRY_DB_PATH",
+        str(Path(__file__).parent.parent / "agent_registry.db"),
+    )
+)
 SALT = "pinelabs_kya_secret_salt_2026"
 
 def get_connection() -> sqlite3.Connection:
@@ -74,4 +80,3 @@ def get_agent_by_agent_id(agent_id: str) -> Optional[dict]:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM registered_agents WHERE agent_id = ?", (agent_id,)).fetchone()
     return dict(row) if row else None
-

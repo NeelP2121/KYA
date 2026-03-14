@@ -29,11 +29,12 @@ This server exposes KYC verification as **MCP tools** — structured, callable f
 
 **What it does:**
 - Registers users and manages their KYC lifecycle
+- Registers customer-controlled agents and verifies their routing eligibility
 - Verifies identity documents (Aadhaar, PAN, Mobile) against a mock DigiLocker
 - Enforces a multi-step flow: document submission → OTP confirmation → verification
 - Stores all results and a full audit trail in SQLite (`kyc_store.db`)
 - Automatically triggers a unique **Agent ID** generation bounded to the user upon verification completion and saves this in `agent_registry.db`.
-- Exposes everything as **10 clean MCP tools** over HTTP/SSE
+- Exposes everything as 12 MCP tools over HTTP/SSE
 
 **What it is NOT (yet):**
 - Connected to real UIDAI / NSDL / telecom APIs (mock only)
@@ -45,7 +46,7 @@ This server exposes KYC verification as **MCP tools** — structured, callable f
 
 ```
 kyc_mcp_server/
-├── server.py                  ← MCP server entry point, 10 tools defined here
+├── server.py                  ← MCP server entry point, 12 tools defined here
 ├── kyc_service.py             ← All business logic (tools call this)
 ├── registry_service.py        ← Unique Agent ID generation and lookup logic
 ├── otp_service.py             ← OTP verification logic
@@ -102,8 +103,8 @@ On success you will see:
 ```
 🚀 KYC MCP Server starting on http://0.0.0.0:8000
    SSE endpoint : http://0.0.0.0:8000/sse
-   Tools        : 10 tools registered
-   Storage      : SQLite → kyc_store.db
+   Tools        : 12 tools registered
+   Storage      : SQLite → /path/to/kyc_store.db (+ /path/to/agent_registry.db)
    OTP          : Fixed (421596), valid 10 min
 ```
 
@@ -584,6 +585,60 @@ List all users, optionally filtered by KYC status.
 
 ---
 
+### `register_agent`
+Register a customer-controlled agent with AR before routing traffic to an ecommerce MCP.
+
+```json
+// Request
+{
+  "user_id": "<uuid>",
+  "agent_name": "Rahul Shopper Agent",
+  "description": "Customer-controlled ecommerce agent",
+  "capabilities_json": "[\"ECOMMERCE_ACCESS\", \"CHECKOUT\"]"
+}
+
+// Response
+{
+  "success": true,
+  "agent": {
+    "agent_id": "<uuid>",
+    "user_id": "<uuid>",
+    "agent_name": "Rahul Shopper Agent",
+    "capabilities": ["ECOMMERCE_ACCESS", "CHECKOUT"],
+    "status": "ACTIVE"
+  }
+}
+```
+
+---
+
+### `verify_agent_capability`
+Check whether an agent is registered with AR and can be routed to an ecommerce MCP.
+
+```json
+// Request
+{"agent_id": "<uuid>", "capability": "ECOMMERCE_ACCESS"}
+
+// Response (registered and allowed)
+{
+  "success": true,
+  "allowed_to_route": true,
+  "route_decision": "ALLOW",
+  "verified_capability": "ECOMMERCE_ACCESS"
+}
+
+// Response (unknown agent)
+{
+  "success": false,
+  "allowed_to_route": false,
+  "route_decision": "BLOCK_REGISTER_AGENT",
+  "registration_required": true,
+  "message": "Agent is not registered with AR. Please register the agent first before routing traffic to the ecommerce MCP."
+}
+```
+
+---
+
 ### `list_supported_document_types`
 Discover verifiable document types and their required fields. Call this first when building integrations.
 
@@ -752,7 +807,7 @@ VERIFIERS = [
 ]
 ```
 
-Done. All 8 tools now support `DRIVING_LICENCE` automatically. No other files change.
+Done. All existing KYC tools now support `DRIVING_LICENCE` automatically. No other files change.
 
 ---
 

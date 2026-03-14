@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 import sys
 import time
@@ -12,7 +13,7 @@ except ImportError:
 
 def main():
     print("--- Testing Agent Registry Flow ---")
-    client = MCPClient("http://localhost:8000")
+    client = MCPClient(os.environ.get("KYC_MCP_BASE_URL", "http://localhost:8000"))
     
     print("Connecting...")
     client.connect()

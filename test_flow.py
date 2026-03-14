@@ -11,11 +11,13 @@ Protocol:
 
 import httpx
 import json
+import os
 import threading
 import queue
 import time
+import uuid
 
-BASE = "http://localhost:8000"
+BASE = os.environ.get("KYC_MCP_BASE_URL", "http://localhost:8000")
 
 
 class MCPClient:
@@ -139,11 +141,13 @@ def run_tests():
     req = 1
     USER_ID = None
     SESSION_ID = None
+    AGENT_ID = None
+    user_email = f"rahul+{uuid.uuid4().hex[:8]}@example.com"
 
     print("=== 1. REGISTER USER ===")
     res = client.call_tool("register_user", {
         "full_name": "Rahul Sharma",
-        "email": "rahul@example.com",
+        "email": user_email,
         "phone": "9876543210"
     }, req_id=req); req += 1
     print(json.dumps(res, indent=2))
@@ -154,25 +158,81 @@ def run_tests():
     print("=== 2. DUPLICATE EMAIL (expect failure) ===")
     res = client.call_tool("register_user", {
         "full_name": "Rahul Sharma",
-        "email": "rahul@example.com",
+        "email": user_email,
     }, req_id=req); req += 1
     assert not res["success"]
     print(f"✅ Correctly rejected: {res['error']}\n")
 
-    print("=== 3. CHECK KYC STATUS (expect PENDING) ===")
+    print("=== 3. VERIFY UNKNOWN AGENT (expect register-first block) ===")
+    res = client.call_tool("verify_agent_capability", {
+        "agent_id": str(uuid.uuid4()),
+        "capability": "ECOMMERCE_ACCESS",
+    }, req_id=req); req += 1
+    print(json.dumps(res, indent=2))
+    assert not res["success"]
+    assert not res["allowed_to_route"]
+    assert res["registration_required"]
+    assert res["route_decision"] == "BLOCK_REGISTER_AGENT"
+    print()
+
+    print("=== 4. REGISTER AGENT FOR UNKNOWN USER (expect failure) ===")
+    res = client.call_tool("register_agent", {
+        "user_id": str(uuid.uuid4()),
+        "agent_name": "Ghost Agent",
+        "description": "Should fail because owner is unknown",
+    }, req_id=req); req += 1
+    print(json.dumps(res, indent=2))
+    assert not res["success"]
+    print()
+
+    print("=== 5. REGISTER AGENT ===")
+    res = client.call_tool("register_agent", {
+        "user_id": USER_ID,
+        "agent_name": "Rahul Shopper Agent",
+        "description": "Customer-controlled ecommerce agent",
+        "capabilities_json": json.dumps(["ECOMMERCE_ACCESS", "CHECKOUT"]),
+    }, req_id=req); req += 1
+    print(json.dumps(res, indent=2))
+    assert res["success"]
+    AGENT_ID = res["agent"]["agent_id"]
+    print(f"→ agent_id: {AGENT_ID}\n")
+
+    print("=== 6. VERIFY REGISTERED AGENT (expect allow) ===")
+    res = client.call_tool("verify_agent_capability", {
+        "agent_id": AGENT_ID,
+        "capability": "ECOMMERCE_ACCESS",
+    }, req_id=req); req += 1
+    print(json.dumps(res, indent=2))
+    assert res["success"]
+    assert res["allowed_to_route"]
+    assert res["route_decision"] == "ALLOW"
+    print()
+
+    print("=== 7. VERIFY MISSING CAPABILITY (expect block) ===")
+    res = client.call_tool("verify_agent_capability", {
+        "agent_id": AGENT_ID,
+        "capability": "PAY_ORDER",
+    }, req_id=req); req += 1
+    print(json.dumps(res, indent=2))
+    assert not res["success"]
+    assert not res["allowed_to_route"]
+    assert res["route_decision"] == "BLOCK_CAPABILITY_MISSING"
+    print()
+
+    print("=== 8. CHECK KYC STATUS (expect PENDING) ===")
     res = client.call_tool("check_kyc_status", {
         "user_id": USER_ID
     }, req_id=req); req += 1
     assert res["kyc_status"] == "PENDING"
     print(f"✅ Status: {res['kyc_status']}\n")
 
-    print("=== 4. LIST SUPPORTED DOCUMENT TYPES ===")
+    print("=== 9. LIST SUPPORTED DOCUMENT TYPES ===")
     res = client.call_tool("list_supported_document_types", {}, req_id=req); req += 1
     for doc in res["supported_documents"]:
         print(f"  {doc['doc_type']} — required fields: {doc['required_fields']}")
     print()
 
-    print("=== 5. BAD AADHAAR FORMAT (expect failure) ===")
+    print("=== 10. BAD AADHAAR FORMAT (expect failure) ===")
     res = client.call_tool("initiate_kyc", {
         "user_id": USER_ID,
         "documents_json": json.dumps({"AADHAAR": {"aadhaar_number": "012345"}})
@@ -180,7 +240,7 @@ def run_tests():
     assert not res["success"]
     print(f"✅ Correctly rejected: {res['error']}\n")
 
-    print("=== 6. UNKNOWN DOC TYPE (expect failure) ===")
+    print("=== 11. UNKNOWN DOC TYPE (expect failure) ===")
     res = client.call_tool("initiate_kyc", {
         "user_id": USER_ID,
         "documents_json": json.dumps({"DRIVING_LICENCE": {"number": "X"}})
@@ -188,7 +248,7 @@ def run_tests():
     assert not res["success"]
     print(f"✅ Correctly rejected: {res['error']}\n")
 
-    print("=== 7. INITIATE KYC ===")
+    print("=== 12. INITIATE KYC ===")
     res = client.call_tool("initiate_kyc", {
         "user_id": USER_ID,
         "documents_json": json.dumps({
@@ -202,7 +262,7 @@ def run_tests():
     SESSION_ID = res["session_id"]
     print(f"→ session_id: {SESSION_ID}\n")
 
-    print("=== 8. WRONG OTP (expect failure) ===")
+    print("=== 13. WRONG OTP (expect failure) ===")
     res = client.call_tool("confirm_kyc_otp", {
         "user_id": USER_ID,
         "session_id": SESSION_ID,
@@ -211,7 +271,7 @@ def run_tests():
     assert not res["success"]
     print(f"✅ Correctly rejected: {res['error']}\n")
 
-    print("=== 9. CORRECT OTP (421596) → expect VERIFIED ===")
+    print("=== 14. CORRECT OTP (421596) → expect VERIFIED ===")
     res = client.call_tool("confirm_kyc_otp", {
         "user_id": USER_ID,
         "session_id": SESSION_ID,
@@ -221,7 +281,7 @@ def run_tests():
     assert res["kyc_status"] == "VERIFIED"
     print()
 
-    print("=== 10. FETCH VERIFIED PROFILE ===")
+    print("=== 15. FETCH VERIFIED PROFILE ===")
     res = client.call_tool("fetch_verified_profile", {
         "user_id": USER_ID
     }, req_id=req); req += 1
@@ -230,7 +290,7 @@ def run_tests():
     assert len(res["verified_documents"]) == 3
     print()
 
-    print("=== 11. RE-VERIFY KYC ===")
+    print("=== 16. RE-VERIFY KYC ===")
     res = client.call_tool("re_verify_kyc", {
         "user_id": USER_ID,
         "documents_json": json.dumps({"PAN": {"pan_number": "ABCDE1234F"}})
@@ -246,7 +306,7 @@ def run_tests():
     print(f"Re-verify result: {res['kyc_status']}\n")
     assert res["kyc_status"] == "VERIFIED"
 
-    print("=== 12. LIST VERIFIED USERS ===")
+    print("=== 17. LIST VERIFIED USERS ===")
     res = client.call_tool("list_registered_users", {
         "kyc_status_filter": "VERIFIED"
     }, req_id=req); req += 1

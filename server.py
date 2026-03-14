@@ -1,7 +1,8 @@
 """
 KYC MCP Server — HTTP/SSE Transport
 =====================================
-Exposes 8 MCP tools for KYC registration and verification.
+Exposes MCP tools for KYC registration, agent ID generation, agent registration,
+and routing checks.
 
 Transport : HTTP + Server-Sent Events (SSE)
 Port      : 8000 (configurable via KYC_MCP_PORT env var)
@@ -17,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp.server.fastmcp import FastMCP
-from db.database import init_db
+from db.database import DB_PATH, init_db
 import kyc_service as svc
 
 # ─────────────────────────────────────────────────────────
@@ -26,14 +27,22 @@ import kyc_service as svc
 
 init_db()
 
+MCP_HOST = os.environ.get("KYC_MCP_HOST", "0.0.0.0")
+MCP_PORT = int(os.environ.get("KYC_MCP_PORT", 8000))
+
 mcp = FastMCP(
     name="kyc-mcp-server",
     instructions=(
         "This server provides KYC (Know Your Customer) verification tools. "
         "Typical flow: register_user → initiate_kyc → confirm_kyc_otp → fetch_verified_profile. "
+        "Use verify_and_generate_id or get_registered_agent_id for the KYC-generated agent identity. "
+        "Use register_agent to issue an AR-managed agent_id for a customer-controlled agent. "
+        "Use verify_agent_capability before routing any request to an ecommerce MCP. "
         "Use re_verify_kyc to update or replace documents for an existing user. "
         "Use list_supported_document_types to see all verifiable document types."
     ),
+    host=MCP_HOST,
+    port=MCP_PORT,
 )
 
 # ─────────────────────────────────────────────────────────
@@ -278,22 +287,83 @@ def list_supported_document_types() -> str:
 
 
 # ─────────────────────────────────────────────────────────
+# Tool 9 — register_agent
+# ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+def register_agent(
+    user_id: str,
+    agent_name: str,
+    description: str = "",
+    capabilities_json: str = "",
+) -> str:
+    """
+    Register a customer-controlled agent with AR.
+
+    Args:
+        user_id:           The AR user who owns this agent.
+        agent_name:        Display name for the agent.
+        description:       Optional plain-language description.
+        capabilities_json: Optional JSON array of allowed capabilities, for example:
+                           ["ECOMMERCE_ACCESS", "CHECKOUT"]
+                           Defaults to ["ECOMMERCE_ACCESS"] when omitted.
+
+    Returns:
+        JSON with the AR-managed agent_id and granted capabilities.
+    """
+    capabilities = None
+    if capabilities_json.strip():
+        try:
+            capabilities = json.loads(capabilities_json)
+        except json.JSONDecodeError as e:
+            return json.dumps({"success": False, "error": f"Invalid capabilities_json: {e}"})
+
+        if not isinstance(capabilities, list):
+            return json.dumps(
+                {"success": False, "error": "capabilities_json must decode to a JSON array."}
+            )
+
+    result = svc.register_agent(
+        user_id=user_id,
+        agent_name=agent_name,
+        description=description,
+        capabilities=capabilities,
+    )
+    return json.dumps(result, indent=2)
+
+
+# ─────────────────────────────────────────────────────────
+# Tool 10 — verify_agent_capability
+# ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+def verify_agent_capability(agent_id: str, capability: str = "ECOMMERCE_ACCESS") -> str:
+    """
+    Verify that an agent is registered with AR and has the capability needed
+    before traffic is forwarded to an ecommerce MCP.
+
+    Args:
+        agent_id:    The AR-managed agent_id returned by register_agent.
+        capability:  Capability required for the next routed action.
+
+    Returns:
+        JSON with allow/block decision and next steps for the MCP client.
+    """
+    result = svc.verify_agent_capability(agent_id=agent_id, capability=capability)
+    return json.dumps(result, indent=2)
+
+
+# ─────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import asyncio
     from otp_service import OTP_VALIDITY_MINUTES
 
-    port = int(os.environ.get("KYC_MCP_PORT", 8000))
-    host = os.environ.get("KYC_MCP_HOST", "0.0.0.0")
-
-    print(f"🚀 KYC MCP Server starting on http://{host}:{port}")
-    print(f"   SSE endpoint : http://{host}:{port}/sse")
-    print(f"   Tools        : 10 tools registered")
-    print(f"   Storage      : SQLite → kyc_store.db")
+    print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
+    print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
+    print(f"   Tools        : 12 tools registered")
+    print(f"   Storage      : SQLite → {DB_PATH}")
     print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
 
-    mcp.settings.host = host
-    mcp.settings.port = port
-    asyncio.run(mcp.run_sse_async())
+    mcp.run(transport="sse")
