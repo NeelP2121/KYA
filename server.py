@@ -357,11 +357,15 @@ def verify_agent_capability(agent_id: str, capability: str = "ECOMMERCE_ACCESS")
 
 if __name__ == "__main__":
     from otp_service import OTP_VALIDITY_MINUTES
+    import sys as _sys
 
-    print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
-    print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
-    print(f"   Tools        : 10 tools registered")
-    print(f"   Storage      : SQLite → {DB_PATH}")
-    print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
-
-    mcp.run(transport="sse")
+    if "--sse" in _sys.argv:
+        print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
+        print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
+        print(f"   Tools        : 10 tools registered")
+        print(f"   Storage      : SQLite → {DB_PATH}")
+        print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
+        mcp.run(transport="sse")
+    else:
+        # Default: stdio transport (for Claude Desktop)
+        mcp.run(transport="stdio")

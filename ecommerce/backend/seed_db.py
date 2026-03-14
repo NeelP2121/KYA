@@ -16,13 +16,13 @@ def generate_product():
     name = f"{brand} {model} '{color}'"
     price = round(random.uniform(90.0, 350.0), 2)
     
-    # Use local static placeholder images
+    # Use local static placeholder images (served by FastAPI on port 8002)
     sneaker_images = [
-        "http://127.0.0.1:8000/static/image_1.png",
-        "http://127.0.0.1:8000/static/image_2.png",
-        "http://127.0.0.1:8000/static/image_3.png",
-        "http://127.0.0.1:8000/static/image_4.png",
-        "http://127.0.0.1:8000/static/image_5.png"
+        "http://127.0.0.1:8002/static/image_1.png",
+        "http://127.0.0.1:8002/static/image_2.png",
+        "http://127.0.0.1:8002/static/image_3.png",
+        "http://127.0.0.1:8002/static/image_4.png",
+        "http://127.0.0.1:8002/static/image_5.png"
     ]
     image_url = random.choice(sneaker_images)
 
