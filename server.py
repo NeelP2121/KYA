@@ -1,8 +1,7 @@
 """
 KYC MCP Server — HTTP/SSE Transport
 =====================================
-Exposes MCP tools for KYC registration, agent ID generation, agent registration,
-and routing checks.
+Exposes MCP tools for KYC registration, agent registration, and routing checks.
 
 Transport : HTTP + Server-Sent Events (SSE)
 Port      : 8000 (configurable via KYC_MCP_PORT env var)
@@ -35,7 +34,6 @@ mcp = FastMCP(
     instructions=(
         "This server provides KYC (Know Your Customer) verification tools. "
         "Typical flow: register_user → initiate_kyc → confirm_kyc_otp → fetch_verified_profile. "
-        "Use verify_and_generate_id or get_registered_agent_id for the KYC-generated agent identity. "
         "Use register_agent to issue an AR-managed agent_id for a customer-controlled agent. "
         "Use verify_agent_capability before routing any request to an ecommerce MCP. "
         "Use re_verify_kyc to update or replace documents for an existing user. "
@@ -362,7 +360,7 @@ if __name__ == "__main__":
 
     print(f"🚀 KYC MCP Server starting on http://{MCP_HOST}:{MCP_PORT}")
     print(f"   SSE endpoint : http://{MCP_HOST}:{MCP_PORT}/sse")
-    print(f"   Tools        : 12 tools registered")
+    print(f"   Tools        : 10 tools registered")
     print(f"   Storage      : SQLite → {DB_PATH}")
     print(f"   OTP          : Fixed (421596), valid {OTP_VALIDITY_MINUTES} min")
 
