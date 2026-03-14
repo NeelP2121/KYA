@@ -21,11 +21,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp.server.fastmcp import FastMCP
 from database import SessionLocal, Product, Order, Cart, CartItem, product_collection
 import pinelabs_service
+import ar_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ─── MCP Server Setup ────────────────────────────────────
+
+SERVICE_NAME = os.environ.get("SOLESPACE_SERVICE_NAME", "solespace")
+SERVICE_URL = os.environ.get("SOLESPACE_SERVICE_URL", "http://localhost:8001")
 
 mcp = FastMCP(
     name="solespace-ecommerce",
@@ -34,7 +38,8 @@ mcp = FastMCP(
         "Browse and search 150+ sneakers, manage your shopping cart, "
         "and checkout with secure Pine Labs payments. "
         "Flow: search_products → add_to_cart → view_cart → checkout_cart → get_payment_status. "
-        "All cart and checkout operations require an agent_id (any string identifier)."
+        "All cart and checkout operations require a valid KYA agent_id registered with AR. "
+        "If you do not have one yet, use the KYA/AR MCP server first to complete KYC and register an agent."
     ),
     host="0.0.0.0",
     port=8001,
@@ -60,6 +65,38 @@ def _format_cart(cart, label: str = "🛒 Your Cart") -> str:
     lines.append("  ─────────────────────")
     lines.append(f"  Total: ${total:.2f}")
     return "\n".join(lines)
+
+
+def _ensure_service_registration() -> None:
+    result = ar_client.ensure_service_registered(
+        service_name=SERVICE_NAME,
+        service_url=SERVICE_URL,
+        description="SoleSpace ecommerce MCP server",
+        capabilities=["ECOMMERCE"],
+    )
+    if not result.get("success"):
+        logger.warning("Could not register SoleSpace with AR: %s", result.get("reason"))
+        return
+
+    service = result.get("service", {})
+    if result.get("registered"):
+        logger.info("Registered service '%s' with AR at %s", service.get("service_name"), service.get("service_url"))
+    else:
+        logger.info("Service '%s' already registered with AR", service.get("service_name"))
+
+
+def _require_agent(agent_id: str, capability: str = "ECOMMERCE_ACCESS") -> dict | None:
+    verification = ar_client.verify_agent(
+        agent_id=agent_id,
+        required_capability=capability,
+        service_name=SERVICE_NAME,
+    )
+    if verification.get("allowed"):
+        return None
+    return verification
+
+
+_ensure_service_registration()
 
 
 # ─── Tool 1: search_products ─────────────────────────────
@@ -143,15 +180,16 @@ def add_to_cart(agent_id: str, product_id: int, quantity: int = 1) -> str:
     Add a product to your shopping cart.
 
     Args:
-        agent_id:   Your identifier (any string, e.g. your name or agent ID).
+        agent_id:   Your KYA agent ID.
         product_id: The ID of the product to add.
         quantity:    How many to add (default: 1).
 
     Returns:
         Updated cart summary.
     """
-    # Verification skipped per request
-    pass
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
 
     db = SessionLocal()
     try:
@@ -198,11 +236,15 @@ def view_cart(agent_id: str) -> str:
     View your current shopping cart.
 
     Args:
-        agent_id: Your identifier.
+        agent_id: Your KYA agent ID.
 
     Returns:
         Cart contents with items, quantities, and total.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         cart = (
@@ -223,12 +265,16 @@ def remove_from_cart(agent_id: str, product_id: int) -> str:
     Remove a product from your cart.
 
     Args:
-        agent_id:   Your identifier.
+        agent_id:   Your KYA agent ID.
         product_id: The ID of the product to remove.
 
     Returns:
         Updated cart summary.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         cart = (
@@ -265,13 +311,17 @@ def update_cart_quantity(agent_id: str, product_id: int, quantity: int) -> str:
     Set quantity to 0 to remove the item.
 
     Args:
-        agent_id:   Your identifier.
+        agent_id:   Your KYA agent ID.
         product_id: The ID of the product to update.
         quantity:    New quantity (0 = remove).
 
     Returns:
         Updated cart summary.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         cart = (
@@ -314,13 +364,14 @@ def checkout_cart(agent_id: str) -> str:
     a payment URL to complete the purchase.
 
     Args:
-        agent_id: Your identifier.
+        agent_id: Your KYA agent ID.
 
     Returns:
         Order summary with payment link and test card details.
     """
-    # Verification skipped per request
-    pass
+    verification_error = _require_agent(agent_id, "CHECKOUT")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
 
     db = SessionLocal()
     try:
@@ -347,8 +398,7 @@ def checkout_cart(agent_id: str) -> str:
                 "quantity": item.quantity,
             })
 
-        # Customer info skipped per request
-        user_info = {}
+        user_info = ar_client.get_agent_user_info(agent_id) or {}
 
         # Generate merchant reference
         merchant_ref = f"sole_{uuid.uuid4().hex[:12]}"
@@ -455,12 +505,16 @@ def get_payment_status(agent_id: str, merchant_reference: str = "") -> str:
     Check the payment status of your order with Pine Labs.
 
     Args:
-        agent_id:           Your identifier.
+        agent_id:           Your KYA agent ID.
         merchant_reference: Optional order reference. If omitted, checks the most recent order.
 
     Returns:
         Payment status and order details.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         query = db.query(Order).filter(Order.agent_id == agent_id)
@@ -564,11 +618,15 @@ def get_orders(agent_id: str) -> str:
     View all your orders and their statuses.
 
     Args:
-        agent_id: Your identifier.
+        agent_id: Your KYA agent ID.
 
     Returns:
         List of all orders grouped by reference.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         orders = (
@@ -613,12 +671,16 @@ def cancel_order(agent_id: str, order_id: int) -> str:
     Cancel an order. Only orders with pending/created payment can be cancelled.
 
     Args:
-        agent_id: Your identifier.
+        agent_id: Your KYA agent ID.
         order_id: The order ID to cancel.
 
     Returns:
         Cancellation confirmation.
     """
+    verification_error = _require_agent(agent_id, "ECOMMERCE_ACCESS")
+    if verification_error:
+        return f"Access denied: {verification_error['reason']}"
+
     db = SessionLocal()
     try:
         order = db.query(Order).filter(Order.id == order_id).first()

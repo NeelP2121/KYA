@@ -337,7 +337,7 @@ def register_service(service_name, service_url, description, capabilities, api_k
             (service_name,)
         ).fetchone()
         if existing:
-            return dict(existing)  # Return existing registration
+            return get_service_by_name(service_name)
         conn.execute(
             "INSERT INTO registered_services "
             "(id, service_name, service_url, description, capabilities, api_key, status, registered_at) "
@@ -363,4 +363,3 @@ def get_service_by_name(service_name):
     d = dict(row)
     d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
     return d
-

@@ -11,7 +11,7 @@ from otp_service import verify_otp, FIXED_OTP, OTP_VALIDITY_MINUTES
 import registry_service
 
 
-DEFAULT_AGENT_CAPABILITIES = ["ECOMMERCE_ACCESS"]
+DEFAULT_AGENT_CAPABILITIES = ["ECOMMERCE_ACCESS", "CHECKOUT", "PAYMENT"]
 
 
 # ─────────────────────────────────────────────────────────
@@ -205,7 +205,14 @@ def confirm_kyc_otp(user_id: str, session_id: str, otp: str) -> dict:
     if all_verified:
         agent = registry_service.generate_or_get_agent_id(user)
         response["agent_id"] = agent["agent_id"]
-        response["message"] += f" Agent ID generated: {agent['agent_id']}"
+        response["registry_agent_id"] = agent["agent_id"]
+        response["message"] += (
+            f" Registry agent ID generated: {agent['agent_id']}. "
+            "For ecommerce access, call register_agent to create the AR-managed agent ID."
+        )
+        response["next_step"] = (
+            "KYC is VERIFIED. Call register_agent to create an AR-managed agent_id for ecommerce."
+        )
 
     return response
 
@@ -222,8 +229,12 @@ def verify_and_generate_id(user_id: str, session_id: str, otp: str) -> dict:
     if res.get("success") and "agent_id" in res:
         return {
             "success": True,
-            "message": "User verified successfully.",
+            "message": (
+                "User verified successfully. "
+                "Call register_agent next to create the AR-managed agent_id for ecommerce."
+            ),
             "agent_id": res["agent_id"],
+            "registry_agent_id": res["agent_id"],
             "kyc_status": res["kyc_status"]
         }
     return res
@@ -419,6 +430,13 @@ def register_agent(
         return _err(
             f"User '{user_id}' not found. Register the customer with register_user first."
         )
+    if user["kyc_status"] != "VERIFIED":
+        return _err(
+            "User must complete KYC and reach VERIFIED status before registering an agent.",
+            user_id=user_id,
+            current_kyc_status=user["kyc_status"],
+            next_step="Complete initiate_kyc and confirm_kyc_otp first.",
+        )
 
     agent_name = agent_name.strip()
     if not agent_name:
@@ -496,6 +514,22 @@ def verify_agent_capability(
                 "before routing traffic to the ecommerce MCP."
             ),
             "next_step": "Call register_agent to obtain an AR-managed agent_id.",
+        }
+
+    user = kyc_db.get_user_by_id(agent["user_id"])
+    if not user or user["kyc_status"] != "VERIFIED":
+        kyc_db.audit(
+            "AGENT_ROUTING_BLOCKED",
+            user_id=agent["user_id"],
+            detail={"agent_id": agent_id, "capability": requested_capability, "reason": "USER_NOT_VERIFIED"},
+        )
+        return {
+            "success": False,
+            "allowed_to_route": False,
+            "route_decision": "BLOCK_USER_NOT_VERIFIED",
+            "registration_required": False,
+            "message": "Agent owner is not KYC verified. Complete KYC before ecommerce routing.",
+            "agent": _safe_agent(agent),
         }
 
     if agent["status"] != "ACTIVE":
@@ -608,6 +642,10 @@ def verify_traffic(agent_id: str, service_name: str) -> dict:
         return {"success": False, "allowed": False, "reason": "Agent not registered with AR"}
     if agent["status"] != "ACTIVE":
         return {"success": False, "allowed": False, "reason": "Agent is not active"}
+
+    user = kyc_db.get_user_by_id(agent["user_id"])
+    if not user or user["kyc_status"] != "VERIFIED":
+        return {"success": False, "allowed": False, "reason": "Agent owner is not KYC verified"}
 
     # Check capability match — agent needs ECOMMERCE_ACCESS for ecommerce services
     required_cap = "ECOMMERCE_ACCESS"
